@@ -39,6 +39,7 @@ public class ChatInput extends HorizontalLayout {
     private boolean waitingForResponse = false;
     private SendListener sendListener;
 
+    /** Creates the composer with the text area, Enter-to-send handling, and send button. */
     public ChatInput() {
         addClassName("chat-input");
         setWidthFull();

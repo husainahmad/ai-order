@@ -1,27 +1,13 @@
 target/
-.mvn/wrapper/maven-wrapper.jar
 node_modules/
 dist/
 .DS_Store
+Thumbs.db
 *.log
 logs/
 
-# IntelliJ
-.idea/
-*.iml
-*.iws
-*.ipr
-
-# Vaadin
-vaadin-dev-server-settings.json
-dev-bundle/
-src/main/frontend/generated/
-
-# Eclipse
-.project
-.classpath
-
 # Maven
+.mvn/wrapper/maven-wrapper.jar
 pom.xml.tag
 pom.xml.releaseBackup
 pom.xml.versionsBackup
@@ -30,26 +16,22 @@ release.properties
 dependency-reduced-pom.xml
 buildNumber.properties
 .mvn/timing.properties
-# https://maven.apache.org/tools/wrapper/#Usage_with_or_without_Binary_JAR
 
-# Eclipse m2e generated files
-# Eclipse Core
-.project
-# JDT-specific (Eclipse Java Development Tools)
-.classpath
-src/main/resources/application.yml
-
-# IntelliJ IDEA
+# IDE
 .idea/
 *.iml
 *.iws
 *.ipr
+.project
+.classpath
 
-# OS
-.DS_Store
-Thumbs.db
+# Vaadin
+src/main/frontend/generated/
+frontend/
+vaadin/
 
-# Logs
-*.log
-logs/
+# Env
+src/main/resources/application.yml
+
+# Tools
 .aider*

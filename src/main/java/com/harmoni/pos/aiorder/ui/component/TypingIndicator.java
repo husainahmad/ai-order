@@ -17,6 +17,7 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
  */
 public class TypingIndicator extends VerticalLayout {
 
+    /** Creates the animated three-dot typing indicator. */
     public TypingIndicator() {
         addClassName("typing-indicator");
         setWidthFull();

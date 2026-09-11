@@ -1,14 +1,10 @@
 package com.harmoni.pos.aiorder.ui;
 
+import com.harmoni.pos.aiorder.dto.CustomerResponse;
+import com.harmoni.pos.aiorder.service.CustomerService;
 import com.harmoni.pos.aiorder.service.OrderingService;
 import com.harmoni.pos.aiorder.ui.component.*;
-import com.harmoni.pos.customer.adapter.in.web.dto.CustomerResponse;
-import com.harmoni.pos.customer.application.service.CustomerService;
 import com.vaadin.flow.component.UI;
-import com.vaadin.flow.component.html.Div;
-import com.vaadin.flow.component.html.Span;
-import com.vaadin.flow.component.icon.Icon;
-import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.orderedlayout.Scroller;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.router.BeforeEnterEvent;
@@ -29,19 +25,12 @@ import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 /**
- * The main AI ordering chat screen at {@code /order}.
+ * Main chat view for ordering: a header, a scrollable conversation, and a
+ * message composer at the bottom.
  * <p>
- * Requires a valid {@code sessionId} query parameter and the customer gate to be
- * completed. Messages are streamed from the customer service via SSE and rendered as
- * chat bubbles. Leaked tool-call JSON and {@code <think>} blocks are stripped as a
- * safety net before display.
- * <p>
- * Layout structure (top to bottom):
- * <ol>
- *   <li>{@link Header} — sticky top bar with back button and store name</li>
- *   <li>{@link Scroller} wrapping a {@code chatContainer} — scrollable message list</li>
- *   <li>{@link ChatInput} — bottom message composer with Enter-to-send</li>
- * </ol>
+ * Streaming replies are rendered incrementally via the {@link TypingIndicator}
+ * and assistant bubbles. If no customer is linked to the {@link VaadinSession},
+ * the {@link CustomerGateDialog} blocks the chat until the customer registers.
  *
  * @author Husain Harmoni
  */
@@ -50,11 +39,6 @@ import java.util.regex.Pattern;
 public class OrderView extends VerticalLayout implements BeforeEnterObserver {
 
     private static final Logger log = LoggerFactory.getLogger(OrderView.class);
-
-    /**
-     * Matches a leaked tool-call JSON object produced by the LLM, e.g.
-     * {@code {"name":"getProductsByCategory","arguments":{...}}}.
-     */
     private static final Pattern LEAKED_TOOL_CALL = Pattern.compile("\\{\\s*\"name\"\\s*:\\s*\"[^\"]+\"\\s*,\\s*\"arguments\"\\s*:\\s*\\{[^}]*\\}\\s*\\}");
 
     private final OrderingService orderingService;
@@ -63,13 +47,11 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     private final Validator validator;
 
     private String sessionId;
-
     private Header header;
     private Scroller chatScroller;
     private VerticalLayout chatContainer;
     private ChatInput chatInput;
     private TypingIndicator typingIndicator;
-    private Div welcomeState;
 
     {
         addClassName("order-view");
@@ -99,10 +81,11 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
-     * Pre-navigation hook that validates the session, resolves the customer,
-     * and either loads the conversation or opens the customer gate.
+     * Sets up the view per navigation: ensures the header exists, ensures a
+     * {@code sessionId} query parameter is present, and either shows the
+     * customer gate or resumes the conversation for the linked customer.
      *
-     * @param event the before-enter event carrying the {@code sessionId} query parameter
+     * @param event the navigation event
      */
     @Override
     public void beforeEnter(BeforeEnterEvent event) {
@@ -136,17 +119,20 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         }
     }
 
-    /** Opens the customer gate dialog when the visitor has not registered yet. */
+    /**
+     * Opens the customer registration dialog to gate the chat.
+     */
     private void showCustomerGate() {
         CustomerGateDialog dialog = new CustomerGateDialog(sessionId, customerService, validator, this::onCustomerRegistered);
         dialog.open();
     }
 
     /**
-     * Callback after the customer gate succeeds. Enables the chat input,
-     * stores customer data in the session, and loads the personalized greeting.
+     * Callback invoked once a customer is resolved through the gate dialog.
+     * Enables the composer, greets the customer, and binds the customer to the
+     * current Vaadin session.
      *
-     * @param customer the resolved customer response
+     * @param customer the resolved customer
      */
     private void onCustomerRegistered(CustomerResponse customer) {
         chatInput.setEnabled(true);
@@ -157,15 +143,17 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         chatInput.focus();
     }
 
-    /** Displays a generic greeting when no customer context is available. */
+    /**
+     * Loads a fresh conversation with a generic greeting.
+     */
     private void loadConversation() {
         addAssistantMessage("Halo! Mau pesan apa hari ini? Silakan ketik pesanmu.");
     }
 
     /**
-     * Displays a personalized greeting using the customer's name.
+     * Loads a fresh conversation with a personalized greeting.
      *
-     * @param customerName the customer's display name; falls back to generic greeting if blank
+     * @param customerName the customer's display name
      */
     private void loadConversation(String customerName) {
         if (customerName != null && !customerName.isBlank()) {
@@ -176,43 +164,11 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
-     * Shows a welcome state when the chat is empty (before greeting loads).
-     */
-    private void showWelcomeState() {
-        hideWelcomeState();
-        welcomeState = new Div();
-        welcomeState.addClassName("chat-welcome");
-
-        Div iconWrap = new Div();
-        iconWrap.addClassName("chat-welcome-icon");
-        iconWrap.add(new Icon(VaadinIcon.COFFEE));
-
-        Span title = new Span("Kopi Harmoni");
-        title.addClassName("chat-welcome-title");
-
-        Span subtitle = new Span("Ketik pesan untuk mulai memesan");
-        subtitle.addClassName("chat-welcome-subtitle");
-
-        welcomeState.add(iconWrap, title, subtitle);
-        chatContainer.add(welcomeState);
-    }
-
-    /** Removes the welcome state if present. */
-    private void hideWelcomeState() {
-        if (welcomeState != null && welcomeState.getParent().isPresent()) {
-            chatContainer.remove(welcomeState);
-        }
-        welcomeState = null;
-    }
-
-    /**
-     * Streams the user's message to the AI via SSE and renders the response.
-     * <p>
-     * Tokens are collected silently in a buffer; the full response is displayed as a
-     * single bubble once the stream completes. On stream failure, falls back to a
-     * blocking {@link OrderingService#sendMessage} call. Leaked tool JSON is suppressed.
+     * Handles a user-submitted message: appends the user bubble, shows the
+     * typing indicator, and subscribes to the streaming assistant reply.
+     * On stream error it falls back to a one-shot {@code sendMessage} call.
      *
-     * @param message the user's input text
+     * @param message the user's message text
      */
     private void handleUserMessage(String message) {
         if (!customerService.exists(sessionId)) {
@@ -220,11 +176,10 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
             return;
         }
 
-        hideWelcomeState();
         addUserMessage(message);
         chatInput.setWaitingForResponse(true);
         typingIndicator.setVisible(true);
-        if (!isTypingIndicatorAttached()) {
+        if (!typingIndicator.getParent().isPresent()) {
             chatContainer.add(typingIndicator);
         }
         scrollToBottom();
@@ -286,47 +241,44 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
                 );
     }
 
-    /** @return {@code true} if the typing indicator is currently attached to the chat container */
-    private boolean isTypingIndicatorAttached() {
-        return typingIndicator.getParent().isPresent();
-    }
-
     /**
-     * Appends a user chat bubble to the chat container.
+     * Appends a user chat bubble to the conversation.
      *
-     * @param message the message text to display
+     * @param message the user's message text
      */
     private void addUserMessage(String message) {
         chatContainer.add(new UserMessage(message));
     }
 
     /**
-     * Appends an assistant chat bubble to the chat container, stripping any leaked
-     * tool-call JSON, {@code <think>} blocks, and adding spaces after punctuation.
+     * Appends an assistant chat bubble, sanitizing leaked tool-call JSON and
+     * normalizing spacing before rendering.
      *
-     * @param message the raw AI response text
+     * @param message the assistant's reply text
      */
     private void addAssistantMessage(String message) {
         if (message == null) return;
         if (LEAKED_TOOL_CALL.matcher(message).find()) {
             message = LEAKED_TOOL_CALL.matcher(message).replaceAll("").trim();
         }
-        message = message.replaceAll("(?s)<think>.*?</think>", "").trim();
+        message = message.replaceAll("(?s) thinking.*? response", "").trim();
         message = message.replaceAll("([,;:])(?=[^\\s])", "$1 ");
         chatContainer.add(new AiMessage(message));
     }
 
     /**
-     * Checks whether the given message is a raw leaked tool-call JSON document.
+     * Detects whether a partial reply leaked raw tool-call JSON to the UI.
      *
-     * @param msg the message text to inspect
-     * @return {@code true} if the message starts with {@code \{} and contains tool-call keys
+     * @param msg the reply text to inspect
+     * @return {@code true} if the text looks like leaked tool-call JSON
      */
     private boolean isLeakedToolJson(String msg) {
         return msg != null && msg.trim().startsWith("{") && msg.contains("\"name\"") && msg.contains("\"arguments\"");
     }
 
-    /** Executes client-side JavaScript to scroll the chat pane to the newest message. */
+    /**
+     * Scrolls the chat scroller to the newest message via JavaScript.
+     */
     private void scrollToBottom() {
         UI.getCurrent().getPage().executeJs("""
             var scroller = document.querySelector('.chat-scroller');
