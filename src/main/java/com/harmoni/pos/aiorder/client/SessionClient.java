@@ -22,19 +22,19 @@ import java.util.Map;
 public class SessionClient {
 
     private final WebClient webClient;
-    private final String source;
+    private final CustomerApiProperties properties;
 
     /**
      * Creates a session client bound to the customer-backend WebClient.
      *
      * @param webClient  the customer-backend WebClient
-     * @param properties the customer API configuration (source label)
+     * @param properties the customer API configuration (paths and source label)
      */
     public SessionClient(
             @Qualifier("customerWebClient") WebClient webClient,
             CustomerApiProperties properties) {
         this.webClient = webClient;
-        this.source = properties.source();
+        this.properties = properties;
     }
 
     /**
@@ -44,10 +44,10 @@ public class SessionClient {
      * @return the newly created session response
      */
     public CustomerSessionResponse createSession(Long customerId) {
-        log.debug("POST /api/v1/customer-sessions customerId={}", customerId);
-        Map<String, Object> body = Map.of("customerId", customerId, "source", source);
+        log.debug("POST {} customerId={}", properties.sessionsPath(), customerId);
+        Map<String, Object> body = Map.of("customerId", customerId, "source", properties.source());
         return webClient.post()
-                .uri("/api/v1/customer-sessions")
+                .uri(properties.sessionsPath())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
                 .retrieve()

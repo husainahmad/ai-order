@@ -40,6 +40,8 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
 
     private static final Logger log = LoggerFactory.getLogger(OrderView.class);
     private static final Pattern LEAKED_TOOL_CALL = Pattern.compile("\\{\\s*\"name\"\\s*:\\s*\"[^\"]+\"\\s*,\\s*\"arguments\"\\s*:\\s*\\{[^}]*\\}\\s*\\}");
+    private static final Pattern TOOL_CALL_SEGMENT = Pattern.compile("(?s)<\\|start\\|>.*?<\\|call\\|>");
+    private static final Pattern FINAL_TEXT = Pattern.compile("(?s)^.*?<\\|start\\|>assistant<\\|channel\\|>final<\\|message\\|>(.*)$");
 
     private final OrderingService orderingService;
     private final CustomerService customerService;
@@ -251,19 +253,37 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
-     * Appends an assistant chat bubble, sanitizing leaked tool-call JSON and
-     * normalizing spacing before rendering.
+     * Appends an assistant chat bubble, sanitizing the raw model transcript
+     * before rendering: strips leaked tool-call JSON and control-token segments
+     * and keeps only the final-channel text, then normalizes spacing.
      *
-     * @param message the assistant's reply text
+     * @param message the assistant's raw reply text
      */
     private void addAssistantMessage(String message) {
         if (message == null) return;
-        if (LEAKED_TOOL_CALL.matcher(message).find()) {
-            message = LEAKED_TOOL_CALL.matcher(message).replaceAll("").trim();
-        }
-        message = message.replaceAll("(?s) thinking.*? response", "").trim();
-        message = message.replaceAll("([,;:])(?=[^\\s])", "$1 ");
+        message = sanitizeAssistantText(message);
+        if (message.isBlank()) return;
         chatContainer.add(new AiMessage(message));
+    }
+
+    /**
+     * Cleans the model's raw streamed text for display.
+     * <p>
+     * Removes Claude-style tool-call JSON ({@code {"name","arguments"}}), strips
+     * control-token tool-call segments ({@code <|start|>...<|call|>}), keeps only
+     * the text of a trailing {@code final} channel, and drops any remnant of a
+     * {@code thinking} block.
+     *
+     * @param message the raw model text
+     * @return the clean, user-facing text
+     */
+    private String sanitizeAssistantText(String message) {
+        String clean = LEAKED_TOOL_CALL.matcher(message).replaceAll("").trim();
+        clean = TOOL_CALL_SEGMENT.matcher(clean).replaceAll("");
+        java.util.regex.Matcher finalText = FINAL_TEXT.matcher(clean);
+        if (finalText.find()) clean = finalText.group(1);
+        clean = clean.replaceAll("(?s)thinking.*?response", "").trim();
+        return clean.replaceAll("([,;:])(?=[^\\s])", "$1 ").trim();
     }
 
     /**

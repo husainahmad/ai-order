@@ -26,6 +26,7 @@ public class AiChatClient {
 
     @Qualifier("customerWebClient")
     private final WebClient webClient;
+    private final CustomerApiProperties properties;
 
     /**
      * Sends a message to the AI assistant and returns the complete reply.
@@ -35,10 +36,10 @@ public class AiChatClient {
      * @return the assistant's reply, or {@code null} if the backend returns nothing
      */
     public CustomerMessageResponse chat(Long sessionId, String message) {
-        log.debug("POST /api/v1/customer-sessions/{}/chat", sessionId);
+        log.debug("POST {}/chat sessionId={}", properties.sessionsPath(), sessionId);
         Map<String, String> body = Map.of("message", message);
         return webClient.post()
-                .uri("/api/v1/customer-sessions/{sessionId}/chat", sessionId)
+                .uri(properties.sessionsPath() + "/{sessionId}/chat", sessionId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
                 .retrieve()
@@ -54,10 +55,10 @@ public class AiChatClient {
      * @return a reactive stream of response text chunks
      */
     public Flux<String> chatStream(Long sessionId, String message) {
-        log.debug("POST /api/v1/customer-sessions/{}/chat/stream", sessionId);
+        log.debug("POST {}/chat/stream sessionId={}", properties.sessionsPath(), sessionId);
         Map<String, String> body = Map.of("message", message);
         return webClient.post()
-                .uri("/api/v1/customer-sessions/{sessionId}/chat/stream", sessionId)
+                .uri(properties.sessionsPath() + "/{sessionId}/chat/stream", sessionId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
                 .accept(MediaType.TEXT_EVENT_STREAM)

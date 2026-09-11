@@ -28,6 +28,7 @@ public class CategoryClient {
     @Qualifier("customerWebClient")
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final CustomerApiProperties properties;
 
     /**
      * Retrieves the menu categories for the given customer session.
@@ -36,9 +37,9 @@ public class CategoryClient {
      * @return list of category recommendations; empty if the backend returns nothing parseable
      */
     public List<CategoryRecommendation> getCategories(Long sessionId) {
-        log.debug("GET /api/v1/customer-sessions/{}/categories", sessionId);
+        log.debug("GET {}/categories sessionId={}", properties.sessionsPath(), sessionId);
         String raw = webClient.get()
-                .uri("/api/v1/customer-sessions/{sessionId}/categories", sessionId)
+                .uri(properties.sessionsPath() + "/{sessionId}/categories", sessionId)
                 .retrieve()
                 .bodyToMono(String.class)
                 .block();

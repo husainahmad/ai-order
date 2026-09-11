@@ -28,6 +28,7 @@ public class ProductClient {
     @Qualifier("customerWebClient")
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final CustomerApiProperties properties;
 
     /**
      * Lists the products for a given category id.
@@ -37,9 +38,9 @@ public class ProductClient {
      * @return matching products with prices, or an empty list if none found
      */
     public List<ProductRecommendation> getByCategory(Long sessionId, int categoryId) {
-        log.debug("GET /api/v1/customer-sessions/{}/products/category/{}", sessionId, categoryId);
+        log.debug("GET {}/products/category/{} sessionId={}", properties.sessionsPath(), categoryId, sessionId);
         String raw = webClient.get()
-                .uri("/api/v1/customer-sessions/{sessionId}/products/category/{categoryId}", sessionId, categoryId)
+                .uri(properties.sessionsPath() + "/{sessionId}/products/category/{categoryId}", sessionId, categoryId)
                 .retrieve()
                 .bodyToMono(String.class)
                 .block();

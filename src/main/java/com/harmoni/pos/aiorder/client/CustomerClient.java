@@ -28,6 +28,7 @@ public class CustomerClient {
 
     @Qualifier("customerWebClient")
     private final WebClient webClient;
+    private final CustomerApiProperties properties;
 
     /**
      * Creates a new customer in the customer backend.
@@ -36,9 +37,9 @@ public class CustomerClient {
      * @return the created customer response
      */
     public CustomerResponse create(CreateCustomerRequest request) {
-        log.debug("POST /api/v1/customers name={}", request.name());
+        log.debug("POST {} name={}", properties.customersPath(), request.name());
         return webClient.post()
-                .uri("/api/v1/customers")
+                .uri(properties.customersPath())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request)
                 .retrieve()
@@ -53,11 +54,11 @@ public class CustomerClient {
      * @return matching customers, or an empty list if none found
      */
     public List<CustomerResponse> searchByPhone(String phone) {
-        String uri = UriComponentsBuilder.fromPath("/api/v1/customers")
+        String uri = UriComponentsBuilder.fromPath(properties.customersPath())
                 .queryParam("phone", phone)
                 .queryParam("size", 10)
                 .toUriString();
-        log.debug("GET /api/v1/customers?phone={}", phone);
+        log.debug("GET {}?phone={}", properties.customersPath(), phone);
         Map<String, Object> page = webClient.get()
                 .uri(uri)
                 .retrieve()
@@ -82,9 +83,9 @@ public class CustomerClient {
      * @return the customer response
      */
     public CustomerResponse getById(Long id) {
-        log.debug("GET /api/v1/customers/{}", id);
+        log.debug("GET {}/{}", properties.customersPath(), id);
         return webClient.get()
-                .uri("/api/v1/customers/{id}", id)
+                .uri(properties.customersPath() + "/{id}", id)
                 .retrieve()
                 .bodyToMono(CustomerResponse.class)
                 .block();
