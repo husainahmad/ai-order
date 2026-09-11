@@ -1,91 +1,109 @@
-# Customer Service
+# ai-order — Kopi Harmoni AI Ordering (Vaadin Frontend)
 
-Customer Service dengan Java 21, Spring Boot, MyBatis, MySQL, dan Hexagonal Architecture (Ports & Adapters). Scope: Customer, Customer Session, Customer Message. Tidak bergantung pada Store/Table (konsep milik Order Service).
+Frontend aplikasi "Kopi Harmoni": chat AI untuk memesan menu. Aplikasi Vaadin + Spring Boot yang berjalan sebagai UI terpisah dan berkomunikasi dengan service `customer` (backend) melalui HTTP API. Semua data customer, session, dan menu tersimpan di backend — UI tidak menyentuh database sama sekali.
+
+## Tech Stack
+
+| | |
+|---|---|
+| Bahasa | Java 21 |
+| Framework | Spring Boot 4.1.1 |
+| UI | Vaadin 25.2.6 (Community Edition — gratis) |
+| Reaktif | Spring WebFlux + Reactor (`WebClient`, SSE untuk streaming AI) |
+| JSON | Jackson 3.x (`tools.jackson.*`) |
+| Boilerplate | Lombok |
+| Validasi | Bean Validation (Jakarta) |
+
+> Catatan: Vaadin 24.x tidak kompatibel dengan Spring Boot 4.x. Versi saat ini
+> (25.2.6, free CE) dipilih karena terbukti jalan dengan Spring Boot 4.1.1.
+> Jackson 3.x memakai namespace `tools.jackson.core` / `tools.jackson.databind`
+> (bukan `com.fasterxml.*`).
 
 ## Arsitektur
 
+Sepenuhnya decoupled dari backend — alur panggilan hanya satu arah:
+
 ```text
-adapter.in.web  →  application (use cases + ports)  →  domain
-                          ↑ implements
-        adapter.out.persistence.mybatis (Mapper → XML → MySQL)
+ui (Vaadin views + komponen chat)
+        ↓
+service (OrderingService, CustomerService)
+        ↓
+client (WebClientConfig, *Client → HTTP API)
+        ↓
+customer backend (http://localhost:8084)
 ```
 
-- `domain` — pure Java: model (`Customer`, `CustomerSession`, `CustomerMessage`), enum (`CustomerSessionStatus/Source/Role`), business exceptions. Tanpa Spring/MyBatis/Jackson.
-- `application` — input port (use case interface + command record), output port (repository interface), service `@Transactional`. Hanya tahu domain + port.
-- `adapter.in.web` — REST controller, DTO + Bean Validation, global exception handler. Tidak menyentuh MyBatis.
-- `adapter.out.persistence.mybatis` — entity persistence, mapper interface + XML, repository adapter yang mengimplementasikan output port dan melakukan mapping entity ↔ domain.
+- `ui/` — View: `LandingView` (`/`), `MainLayout` (shell), `OrderView` (`/order?sessionId=...`). Komponen chat: `AiMessage`, `UserMessage`, `ChatInput`, `TypingIndicator`, `Header`, `CustomerGateDialog`.
+- `service/` — `OrderingService` (stream + blocking chat), implementasinya `CustomerAiOrderingService` (via HTTP), `CustomerService` (resolve customer), `CustomerClientService`.
+- `client/` — `WebClientConfig` mem-build bean `customerWebClient`; `CustomerApiProperties` terikat ke properti `customer.api.*` menggantikan `@Value`. HTTP clients: `AiChatClient`, `SessionClient`, `CustomerClient`, `CategoryClient`, `ProductClient`.
+- `dto/` — record DTO hasil mapping respons JSON backend.
+
+## Alur Chat
+
+1. `OrderView` membaca `sessionId` query param (UUID).
+2. Belum ada customer terhubung → `CustomerGateDialog` tampil: login via nomor telepon (login jika ada, register jika belum). Hasilnya disimpan di `VaadinSession` (`customerId`).
+3. Pesan user → `OrderingService.streamMessage`. Bila `customerSessionId` belum ada, dibuat via `POST /api/v1/customer-sessions` lalu dicache di `VaadinSession`.
+4. Respons AI di-stream via SSE (`chat/stream`) dan dirender sebagai bubble per token dengan `TypingIndicator` saat menunggu.
+5. Fallback: bila stream gagal atau tidak menghasilkan token, `OrderingService.sendMessage` (blocking, satu respons) dipanggil.
+
+## Konfigurasi (`application.yaml`)
+
+| Key | Default | Keterangan |
+|---|---|---|
+| `server.port` | `8085` | port aplikasi ini |
+| `app.store-name` | `Kopi Harmoni` | nama toko di header |
+| `customer.api.base-url` | `http://localhost:8084` | base URL backend customer |
+| `customer.api.timeout-ms` | `60000` | timeout connect/response `customerWebClient` |
+| `customer.api.source` | `AI_CHAT` | label `source` pada customer session |
+
+Timeout sengaja besar (60 detik) karena first-token AI bisa memakan waktu lebih dari 5 detik.
 
 ## Menjalankan
 
-Prasyarat: MySQL berjalan, database dibuat manual (Flyway hanya membuat tabel):
-
-```sql
-CREATE DATABASE `db-harmoni-auth`;
-```
-
-Kredensial terpusat pada placeholder `harmoni.user.db` / `harmoni.user.password` di `application.yaml`; koneksi utama memakai Apache Commons DBCP2:
+Prasyarat: backend `customer` berjalan di `http://localhost:8084`.
 
 ```bash
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
 
-Migrasi schema dijalankan otomatis oleh Flyway saat startup:
+Buka `http://localhost:8085`.
 
-- `V1__init_schema.sql` — schema awal (sesuai spesifikasi).
-- `V2__customer_soft_delete.sql` — soft delete customer (lihat bawah).
+## Navigasi
 
-## Keputusan Soft Delete
+| Route | Keterangan |
+|---|---|
+| `/` | landing; resolve sessionId (URL param > VaadinSession > UUID baru), tampilkan gate atau redirect ke order |
+| `/order?sessionId=<uuid>` | chat order |
 
-Delete customer memakai **soft delete**: percakapan (`messages` → `sessions` → `customers`) adalah riwayat bernilai bisnis; hard delete akan memutus FK chain atau menghapus history. Perubahan schema yang dilakukan (tidak diam-diam):
+## Endpoint API Backend yang Dipakai
 
-```sql
-ALTER TABLE customers ADD COLUMN deleted_at timestamp NULL DEFAULT NULL AFTER email;
-ALTER TABLE customers ADD KEY idx_customers_deleted_at (deleted_at);
+| Method | Path |
+|---|---|
+| POST | `/api/v1/customers` |
+| GET | `/api/v1/customers?phone=` |
+| GET | `/api/v1/customers/{id}` |
+| POST | `/api/v1/customer-sessions` |
+| POST | `/api/v1/customer-sessions/{id}/chat` |
+| POST | `/api/v1/customer-sessions/{id}/chat/stream` (SSE) |
+| GET | `/api/v1/customer-sessions/{id}/categories` |
+| GET | `/api/v1/customer-sessions/{id}/products/category/{categoryId}` |
+
+## Build & JavaDoc
+
+```bash
+mvn compile
+mvn javadoc:javadoc   # bersih, 0 warning
 ```
-
-Semua query read/update menambahkan `WHERE deleted_at IS NULL`; `DELETE` men-set `deleted_at = CURRENT_TIMESTAMP`. Trade-off: unique key `uk_customers_phone` tetap me-reserve phone customer terhapus — dup-check aplikasi sengaja konsisten termasuk row terhapus.
-
-## API
-
-| Method | Path | Keterangan |
-|---|---|---|
-| POST | `/api/v1/customers` | Create customer (201) |
-| GET | `/api/v1/customers/{id}` | Detail customer |
-| GET | `/api/v1/customers?search=&page=0&size=20` | Search name/phone/email, pagination di DB |
-| PUT | `/api/v1/customers/{id}` | Update |
-| DELETE | `/api/v1/customers/{id}` | Soft delete (204) |
-| POST | `/api/v1/customer-sessions` | Create session; `customerId` boleh null (anonymous); token dibuat backend |
-| GET | `/api/v1/customer-sessions/{id}` | Detail session |
-| POST | `/api/v1/customer-sessions/{id}/close` | Close session (CLOSED tidak bisa close lagi / re-open) |
-| POST | `/api/v1/customer-sessions/{sessionId}/messages` | Add message (role: USER/ASSISTANT/SYSTEM); ditolak jika session CLOSED |
-| GET | `/api/v1/customer-sessions/{sessionId}/messages?page=0&size=50` | History ASC, pagination di DB |
-
-Contoh error response:
-
-```json
-{
-  "timestamp": "2026-08-23T06:00:00Z",
-  "status": 404,
-  "code": "CUSTOMER_NOT_FOUND",
-  "message": "Customer not found: 42"
-}
-```
-
-Kode error: `CUSTOMER_NOT_FOUND` (404), `CUSTOMER_SESSION_NOT_FOUND` (404), `DUPLICATE_CUSTOMER` (409), `INVALID_CUSTOMER_SESSION` (400), `INVALID_CUSTOMER_MESSAGE` (400), `VALIDATION_ERROR` (400), `INTERNAL_ERROR` (500 tanpa stack trace).
-
-## Security
-
-Tidak ada auth di service ini — autentikasi diasumsikan ditangani API Gateway; service hanya menerima request terautentikasi. Extension point authorization dapat ditambahkan nanti sebagai filter/interceptor di `adapter.in.web` tanpa mengubah domain/application.
 
 ## Testing
 
-```bash
-mvn test
-```
+Dependensi test sudah disiapkan (`spring-boot-starter-test`, `reactor-test`, karibu-testing v24 + v10-spring) namun belum ada test case — folder `src/test` masih kosong.
 
-- Unit test application service (Mockito): create/update/not-found/duplicate phone, anonymous & identified session, close session, message pada session CLOSED, role invalid, clamping pagination.
-- Controller test `@WebMvcTest`: seluruh endpoint + validasi + mapping error.
-- Repository integration test `@MybatisTest` + H2 MODE=MySQL (Docker tidak tersedia di lingkungan ini): CRUD, search & pagination di SQL, soft delete, FK message→session, ordering conversation.
-- Full context smoke test `@SpringBootTest`: wiring end-to-end create customer → get → create session.
+## CSS Theme
 
-Untuk integration test terhadap MySQL asli (mis. Testcontainers), jalankan dengan profile datasource MySQL dan Flyway aktif.
+Seluruh styling terkumpul di `src/main/resources/META-INF/resources/frontend/themes/app/styles.css`: design system (warna, shadow, radius, spacing), dukungan dark mode via `prefers-color-scheme`, dan layout responsif.
+
+## Catatan Development
+
+- Error `npm install` pada dev server Vaadin (`vaadin-dev`, optional) umumnya masalah jaringan — jalankan `npm install` di direktori proyek untuk memperbaikinya. Aplikasi tetap berjalan tanpa dev server.
+- Aplikasi ini tidak punya autentikasi sendiri; identitas customer diselesaikan via nomor telepon pada `CustomerGateDialog`.
