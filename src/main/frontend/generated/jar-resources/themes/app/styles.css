@@ -89,7 +89,7 @@
     --color-success: #4ade80;
 
     --header-bg: rgba(28, 25, 23, 0.85);
-    --dialog-overlay-bg: rgba(0, 0, 0, 0.5);
+    --dialog-overlay-bg: rgba(0, 0, 0, 0.32);
 
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -307,6 +307,114 @@ button:focus-visible {
 
 .pre-wrap {
   white-space: pre-wrap;
+}
+
+/* ============================================================
+   Markdown Rendering (inside assistant bubbles)
+   ============================================================ */
+
+.assistant-message .message-text {
+  line-height: 1.6;
+  width: 100%;
+}
+
+.assistant-message .message-text p {
+  margin: 0 0 var(--sp-2);
+}
+
+.assistant-message .message-text p:last-child {
+  margin-bottom: 0;
+}
+
+.assistant-message .message-text strong {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.assistant-message .message-text ul,
+.assistant-message .message-text ol {
+  margin: var(--sp-2) 0;
+  padding-left: var(--sp-5);
+}
+
+.assistant-message .message-text li {
+  margin-bottom: var(--sp-1);
+}
+
+.assistant-message .message-text h1,
+.assistant-message .message-text h2,
+.assistant-message .message-text h3,
+.assistant-message .message-text h4 {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+
+.assistant-message .message-text h1 { font-size: 1.125rem; }
+.assistant-message .message-text h2 { font-size: 1.0625rem; }
+.assistant-message .message-text h3,
+.assistant-message .message-text h4 { font-size: 1rem; }
+
+.assistant-message .message-text code {
+  background-color: var(--color-border-subtle);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 0.84375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.assistant-message .message-text pre {
+  background-color: var(--color-border-subtle);
+  padding: var(--sp-3);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: var(--sp-2) 0;
+}
+
+.assistant-message .message-text pre code {
+  background: none;
+  padding: 0;
+}
+
+.assistant-message .message-text blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding-left: var(--sp-3);
+  margin: var(--sp-2) 0;
+  color: var(--color-text-secondary);
+}
+
+.assistant-message .message-text a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.assistant-message .message-text a:hover {
+  color: var(--color-accent-hover);
+}
+
+.assistant-message .message-text table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--sp-2) 0;
+  font-size: 0.84375rem;
+}
+
+.assistant-message .message-text th {
+  background-color: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 600;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  white-space: nowrap;
+}
+
+.assistant-message .message-text td {
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.assistant-message .message-text tr:nth-child(even) td {
+  background-color: var(--color-border-subtle);
 }
 
 /* ============================================================
@@ -570,6 +678,67 @@ button:focus-visible {
 
 .customer-gate-dialog {
   --lumo-border-radius: var(--radius-xl);
+  --gate-text-primary: #ffffff;
+  --gate-text-secondary: #d6d3d1;
+  --gate-text-tertiary: #a8a29e;
+}
+
+.gate-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.gate-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-xl);
+  background-color: var(--color-accent-light);
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  flex-shrink: 0;
+}
+
+.gate-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.gate-subtitle {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  max-width: 300px;
+}
+
+.gate-submit {
+  letter-spacing: 0.01em;
+  font-weight: 500;
+}
+
+.customer-gate-dialog::part(header),
+.customer-gate-dialog::part(title),
+.customer-gate-dialog::part(header-content) {
+  font-weight: 400;
+}
+
+.customer-gate-dialog vaadin-text-field::part(label),
+.customer-gate-dialog vaadin-email-field::part(label) {
+  font-weight: 400;
+}
+
+.customer-gate-dialog vaadin-text-field::part(input-field),
+.customer-gate-dialog vaadin-email-field::part(input-field) {
+  font-weight: 300;
 }
 
 .customer-gate-dialog::part(overlay) {
@@ -589,6 +758,38 @@ button:focus-visible {
   color: var(--color-text-secondary);
   line-height: 1.5;
   margin-bottom: var(--sp-2);
+}
+
+@media (prefers-color-scheme: dark) {
+  .customer-gate-dialog {
+    --color-text-primary: var(--gate-text-primary);
+    --color-text-secondary: var(--gate-text-secondary);
+    --color-text-tertiary: var(--gate-text-tertiary);
+    --lumo-base-color: var(--color-surface-elevated);
+    --lumo-body-text-color: #ffffff;
+    --lumo-secondary-text-color: var(--gate-text-secondary);
+    --lumo-tertiary-text-color: var(--gate-text-tertiary);
+    --lumo-header-text-color: #ffffff;
+    --lumo-primary-text-color: var(--color-accent);
+    --lumo-primary-color: var(--color-accent);
+  }
+
+  .customer-gate-dialog::part(dialog) {
+    background-color: var(--color-surface-elevated);
+    border-color: var(--color-border);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .customer-gate-dialog vaadin-text-field::part(input-field),
+  .customer-gate-dialog vaadin-email-field::part(input-field) {
+    color: #ffffff;
+  }
+
+  .customer-gate-dialog::part(overlay) {
+    background-color: var(--dialog-overlay-bg);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
 }
 
 /* ============================================================

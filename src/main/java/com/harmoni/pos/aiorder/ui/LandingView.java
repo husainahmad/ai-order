@@ -17,6 +17,7 @@ import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 
 import java.util.UUID;
 
@@ -41,6 +42,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
     private final CustomerService customerService;
     private final Validator validator;
+    private final Environment environment;
 
     private String sessionId;
     private boolean gateShown = false;
@@ -117,7 +119,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     private void showCustomerGate() {
         clearError();
         gateSuccess = false;
-        CustomerGateDialog dialog = new CustomerGateDialog(sessionId, customerService, validator, customer -> {
+        CustomerGateDialog dialog = new CustomerGateDialog(sessionId, environment.getProperty("app.store-name", "Kopi Harmoni"), customerService, validator, customer -> {
             gateSuccess = true;
             onCustomerRegistered(customer);
         });

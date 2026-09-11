@@ -9,8 +9,11 @@ import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.icon.Icon;
+import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
+import com.vaadin.flow.component.orderedlayout.FlexComponent;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.EmailField;
 import com.vaadin.flow.component.textfield.TextField;
@@ -48,17 +51,18 @@ public class CustomerGateDialog extends Dialog {
      * Creates the customer gate dialog.
      *
      * @param sessionId       the Vaadin session ID to associate the customer with
+     * @param storeName       the store name shown in the greeting header
      * @param customerService the service for customer lookup and registration
      * @param validator       Jakarta Bean Validation validator for field-level constraint checks
      * @param onSuccess       callback invoked with the resolved customer after successful login/register
      */
     public CustomerGateDialog(
             String sessionId,
+            String storeName,
             CustomerService customerService,
             Validator validator,
             Consumer<CustomerResponse> onSuccess
     ) {
-        setHeaderTitle("Masuk atau Daftar");
         setCloseOnEsc(false);
         setCloseOnOutsideClick(false);
         setDraggable(false);
@@ -68,8 +72,21 @@ public class CustomerGateDialog extends Dialog {
         setMaxWidth("400px");
         addClassName("customer-gate-dialog");
 
-        Span subtitle = new Span("Gunakan nomor HP untuk masuk. Jika belum terdaftar, Anda akan otomatis terdaftar.");
-        subtitle.addClassName("dialog-subtitle");
+        Icon logo = new Icon(VaadinIcon.COFFEE);
+        logo.addClassName("gate-logo");
+
+        Span title = new Span(storeName != null && !storeName.isBlank() ? storeName : "Kopi Harmoni");
+        title.addClassName("gate-title");
+
+        Span subtitle = new Span("Masuk dengan No. HP untuk mulai memesan. Belum punya akun? Kamu akan otomatis terdaftar.");
+        subtitle.addClassName("gate-subtitle");
+
+        VerticalLayout hero = new VerticalLayout(logo, title, subtitle);
+        hero.addClassName("gate-hero");
+        hero.setAlignItems(FlexComponent.Alignment.CENTER);
+        hero.setJustifyContentMode(FlexComponent.JustifyContentMode.CENTER);
+        hero.setPadding(false);
+        hero.setSpacing(true);
 
         phoneField = new TextField("No. HP");
         phoneField.setPlaceholder("0812xxxxxxx");
@@ -108,6 +125,7 @@ public class CustomerGateDialog extends Dialog {
         submitButton = new Button("Masuk / Daftar", e -> handleSubmit(sessionId, customerService, validator, onSuccess));
         submitButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         submitButton.setWidthFull();
+        submitButton.addClassName("gate-submit");
         submitButton.addClickShortcut(Key.ENTER);
 
         Runnable updateEnabled = () -> {
@@ -118,7 +136,7 @@ public class CustomerGateDialog extends Dialog {
         phoneField.addValueChangeListener(e -> updateEnabled.run());
         updateEnabled.run();
 
-        VerticalLayout content = new VerticalLayout(subtitle, phoneField, nameField, emailField);
+        VerticalLayout content = new VerticalLayout(hero, phoneField, nameField, emailField);
         content.setPadding(false);
         content.setSpacing(true);
         content.setWidthFull();

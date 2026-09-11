@@ -125,7 +125,7 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      * Opens the customer registration dialog to gate the chat.
      */
     private void showCustomerGate() {
-        CustomerGateDialog dialog = new CustomerGateDialog(sessionId, customerService, validator, this::onCustomerRegistered);
+        CustomerGateDialog dialog = new CustomerGateDialog(sessionId, environment.getProperty("app.store-name", "Kopi Harmoni"), customerService, validator, this::onCustomerRegistered);
         dialog.open();
     }
 
@@ -210,7 +210,8 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
                                         var fallback = orderingService.sendMessage(vaadinSessionId, message);
                                         fallbackText = fallback.message();
                                     } catch (Exception ex) {
-                                        fallbackText = "Maaf, AI sedang tidak tersedia: " + err.getMessage();
+                                        log.warn("Fallback sendMessage failed", ex);
+                                        fallbackText = "Maaf, AI sedang tidak tersedia.";
                                     }
                                 }
                                 return fallbackText;

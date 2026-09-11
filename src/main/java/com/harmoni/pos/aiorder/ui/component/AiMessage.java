@@ -49,9 +49,8 @@ public class AiMessage extends VerticalLayout {
         avatar.addClassName("message-avatar");
         avatar.setSize("28px");
 
-        Span text = new Span(message);
+        Span text = new MarkdownText(message);
         text.addClassName("message-text");
-        text.addClassName("pre-wrap");
 
         Span timestamp = new Span(LocalTime.now().format(TIME_FMT));
         timestamp.addClassName("message-timestamp");
