@@ -30,7 +30,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * Main chat view for ordering: a header, a scrollable conversation, and a
@@ -232,8 +231,9 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
-     * Handles a tapped category chip: mirrors the selection in the chat, then
-     * lists that category's products as orderable quick-reply chips.
+     * Handles a tapped category chip: fills the composer with the category
+     * name for a quick edit-and-send, and lists that category's products as
+     * additional chips that also fill the composer when tapped.
      *
      * @param categoryName the tapped category name
      */
@@ -241,20 +241,16 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         if (chatInput.isWaitingForResponse()) {
             return;
         }
+        fillInput(categoryName);
+
         int categoryId = currentCategories.stream()
                 .filter(c -> c.name().equals(categoryName))
                 .findFirst()
                 .map(CategoryRecommendation::id)
                 .orElse(-1);
 
-        addUserMessage(categoryName);
-        typingIndicator.setVisible(true);
-        if (typingIndicator.getParent().isEmpty()) {
-            chatContainer.add(typingIndicator);
-        }
-        scrollToBottom();
-
         UI ui = UI.getCurrent();
+        if (ui == null) return;
         CompletableFuture.supplyAsync(() -> {
             try {
                 Long customerSessionId = orderingService.ensureSession(sessionId);
@@ -266,33 +262,22 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
                 log.warn("Failed to load products for category '{}': {}", categoryName, ex.getMessage());
                 return List.<ProductRecommendation>of();
             }
-        }, ioExecutor).thenAccept(products -> {
-            if (ui == null) return;
-            ui.access(() -> {
-                typingIndicator.setVisible(false);
-                if (typingIndicator.getParent().isPresent()) chatContainer.remove(typingIndicator);
-
-                AiMessage ai;
-                if (products.isEmpty()) {
-                    ai = addAssistantMessage("Maaf, menu kategori **" + categoryName + "** belum tersedia.");
-                } else {
-                    String list = products.stream()
-                            .map(p -> "- " + p.name() + formatPrice(p.price()))
-                            .collect(Collectors.joining("\n"));
-                    ai = addAssistantMessage("Berikut produk di kategori **" + categoryName + "** — ketuk untuk memesan:\n\n" + list);
-                    if (ai != null) {
-                        attachProductChips(ai, products);
-                    }
-                }
-                withQuickReplies(ai, "Lihat menu lain", "Rekap pesanan");
-                scrollToBottom();
-            });
-        });
+        }, ioExecutor).thenAccept(products -> ui.access(() -> {
+            if (products == null || products.isEmpty()) {
+                return;
+            }
+            AiMessage ai = addAssistantMessage("Menu **" + categoryName + "** — ketuk produk untuk mengisi pesan:");
+            if (ai != null) {
+                attachProductChips(ai, products);
+            }
+            scrollToBottom();
+        }));
     }
 
     /**
-     * Adds orderable product chips to an assistant bubble: the chip label shows
-     * the product name (and price), while tapping it sends an order intent.
+     * Adds product chips to an assistant bubble: the chip label shows the
+     * product name (and price), while tapping it fills the composer with an
+     * order intent.
      *
      * @param ai       the bubble to decorate
      * @param products the products to render as chips
@@ -302,7 +287,21 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
                 .limit(MAX_PRODUCT_CHIPS)
                 .map(p -> new QuickReplyChips.Reply(p.name() + formatPrice(p.price()), "Saya mau pesan " + p.name()))
                 .toList();
-        ai.addQuickRepliesWithPayloads(replies, this::handleUserMessage);
+        ai.addQuickRepliesWithPayloads(replies, this::fillInput);
+    }
+
+    /**
+     * Fills the chat composer with the given text so the customer can review
+     * or edit it before sending.
+     *
+     * @param text the draft message text
+     */
+    private void fillInput(String text) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        chatInput.fill(text);
+        scrollToBottom();
     }
 
     /**
