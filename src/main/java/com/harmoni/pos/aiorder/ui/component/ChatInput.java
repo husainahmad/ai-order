@@ -119,6 +119,21 @@ public class ChatInput extends HorizontalLayout {
         return waitingForResponse;
     }
 
+    /**
+     * Fills the text area with the given draft text and refocuses it, so the
+     * customer can review or edit before sending. No-op while the AI is
+     * responding.
+     *
+     * @param text the draft text to place in the composer
+     */
+    public void fill(String text) {
+        if (waitingForResponse) {
+            return;
+        }
+        textArea.setValue(text == null ? "" : text);
+        focus();
+    }
+
     /** {@inheritDoc} */
     @Override
     public void setEnabled(boolean enabled) {
