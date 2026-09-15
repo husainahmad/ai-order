@@ -144,7 +144,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
         UI ui = UI.getCurrent();
         if (ui != null) {
-            ui.navigate("order?sessionId=" + sessionId);
+            ui.navigate("order");
         }
     }
 

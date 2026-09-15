@@ -30,6 +30,11 @@ public class CustomerAiOrderingService implements OrderingService {
     private final CustomerService customerService;
 
     @Override
+    public Long ensureSession(String vaadinSessionId) {
+        return resolveCustomerSessionId(vaadinSessionId);
+    }
+
+    @Override
     public ChatResponse sendMessage(String vaadinSessionId, String message) {
         Long customerSessionId = resolveCustomerSessionId(vaadinSessionId);
         if (customerSessionId == null) {

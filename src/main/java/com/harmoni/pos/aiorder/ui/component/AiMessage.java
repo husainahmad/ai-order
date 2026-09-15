@@ -8,6 +8,8 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Left-aligned chat bubble representing an assistant message.
@@ -21,6 +23,8 @@ import java.time.format.DateTimeFormatter;
 public class AiMessage extends VerticalLayout {
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
+
+    private final VerticalLayout messageWrapper;
 
     /**
      * Creates an assistant message bubble with the given text.
@@ -39,7 +43,7 @@ public class AiMessage extends VerticalLayout {
         layout.setDefaultVerticalComponentAlignment(Alignment.START);
         layout.setSpacing(true);
 
-        VerticalLayout messageWrapper = new VerticalLayout();
+        messageWrapper = new VerticalLayout();
         messageWrapper.addClassName("message-bubble");
         messageWrapper.addClassName("assistant-bubble");
         messageWrapper.setPadding(false);
@@ -59,5 +63,32 @@ public class AiMessage extends VerticalLayout {
 
         layout.add(avatar, messageWrapper);
         add(layout);
+    }
+
+    /**
+     * Appends a row of quick-reply chips below this message's text.
+     *
+     * @param replies the suggestion labels to render as tappable chips
+     * @param handler callback invoked when a chip is clicked, with the chip's label
+     */
+    public void addQuickReplies(List<String> replies, Consumer<String> handler) {
+        if (replies == null || replies.isEmpty()) {
+            return;
+        }
+        messageWrapper.add(new QuickReplyChips(replies, handler));
+    }
+
+    /**
+     * Appends a row of quick-reply chips whose payload differs from the label
+     * (e.g. a product chip labeled with its price that sends an order intent).
+     *
+     * @param replies the label/payload pairs to render
+     * @param handler callback invoked with the clicked chip's payload
+     */
+    public void addQuickRepliesWithPayloads(List<QuickReplyChips.Reply> replies, Consumer<String> handler) {
+        if (replies == null || replies.isEmpty()) {
+            return;
+        }
+        messageWrapper.add(QuickReplyChips.withPayloads(replies, handler));
     }
 }

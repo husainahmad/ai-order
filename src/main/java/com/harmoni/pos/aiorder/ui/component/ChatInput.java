@@ -110,6 +110,15 @@ public class ChatInput extends HorizontalLayout {
         textArea.setEnabled(enabled);
     }
 
+    /**
+     * Returns whether the chat is currently awaiting an AI response.
+     *
+     * @return {@code true} while input and the send button are disabled
+     */
+    public boolean isWaitingForResponse() {
+        return waitingForResponse;
+    }
+
     /** {@inheritDoc} */
     @Override
     public void setEnabled(boolean enabled) {

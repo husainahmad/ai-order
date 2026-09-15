@@ -1,6 +1,10 @@
 package com.harmoni.pos.aiorder.ui;
 
+import com.harmoni.pos.aiorder.client.CategoryClient;
+import com.harmoni.pos.aiorder.client.ProductClient;
+import com.harmoni.pos.aiorder.dto.CategoryRecommendation;
 import com.harmoni.pos.aiorder.dto.CustomerResponse;
+import com.harmoni.pos.aiorder.dto.ProductRecommendation;
 import com.harmoni.pos.aiorder.service.CustomerService;
 import com.harmoni.pos.aiorder.service.OrderingService;
 import com.harmoni.pos.aiorder.ui.component.*;
@@ -9,7 +13,6 @@ import com.vaadin.flow.component.orderedlayout.Scroller;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.router.BeforeEnterEvent;
 import com.vaadin.flow.router.BeforeEnterObserver;
-import com.vaadin.flow.router.Location;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.VaadinSession;
 import jakarta.validation.Validator;
@@ -18,11 +21,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Main chat view for ordering: a header, a scrollable conversation, and a
@@ -42,11 +50,24 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     private static final Pattern LEAKED_TOOL_CALL = Pattern.compile("\\{\\s*\"name\"\\s*:\\s*\"[^\"]+\"\\s*,\\s*\"arguments\"\\s*:\\s*\\{[^}]*\\}\\s*\\}");
     private static final Pattern TOOL_CALL_SEGMENT = Pattern.compile("(?s)<\\|start\\|>.*?<\\|call\\|>");
     private static final Pattern FINAL_TEXT = Pattern.compile("(?s)^.*?<\\|start\\|>assistant<\\|channel\\|>final<\\|message\\|>(.*)$");
+    private static final Pattern CATEGORY_PRODUCT_ID = Pattern.compile("(?i)\\b(?:kategori|produk|category|product|menu)\\s*(?:[#:]\\s*)?IDs?\\s*[#:]?\\s*\\d+\\b");
+    private static final Pattern STANDALONE_ID = Pattern.compile("(?i)\\bIDs?\\s*[#:]?\\s*\\d+\\b");
+    private static final Pattern ID_CELL = Pattern.compile("(?i)^\\s*ID\\s*$");
+    private static final Pattern SEPARATOR_CELL = Pattern.compile("^:?-{2,}:?$|^-{2,}$|^\\s*$");
+    private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^\\]]+)]\\((https?://[^)\\s]+)\\)");
+    private static final Pattern BARE_URL = Pattern.compile("https?://[^\\s)>\"]+");
 
     private final OrderingService orderingService;
     private final CustomerService customerService;
     private final Environment environment;
     private final Validator validator;
+    private final CategoryClient categoryClient;
+    private final ProductClient productClient;
+
+    private static final int MAX_CATEGORY_CHIPS = 6;
+    private static final int MAX_PRODUCT_CHIPS = 8;
+
+    private final ExecutorService ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     private String sessionId;
     private Header header;
@@ -54,6 +75,7 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     private VerticalLayout chatContainer;
     private ChatInput chatInput;
     private TypingIndicator typingIndicator;
+    private List<CategoryRecommendation> currentCategories = List.of();
 
     {
         addClassName("order-view");
@@ -83,9 +105,11 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
-     * Sets up the view per navigation: ensures the header exists, ensures a
-     * {@code sessionId} query parameter is present, and either shows the
-     * customer gate or resumes the conversation for the linked customer.
+     * Sets up the view per navigation: ensures the header exists and resolves
+     * the {@code sessionId} — preferring a legacy query parameter if present,
+     * otherwise reusing the value stored in the {@link VaadinSession} (created
+     * on first visit) so no identifying UUID appears in the URL. Then either
+     * shows the customer gate or resumes the conversation for the linked customer.
      *
      * @param event the navigation event
      */
@@ -96,13 +120,15 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
             addComponentAtIndex(0, header);
         }
 
-        Location location = event.getLocation();
-        sessionId = location.getQueryParameters().getParameters().getOrDefault("sessionId", List.of()).stream().findFirst().orElse(null);
+        sessionId = event.getLocation().getQueryParameters().getParameters()
+                .getOrDefault("sessionId", List.of()).stream().findFirst().orElse(null);
 
         if (sessionId == null || sessionId.isBlank()) {
+            sessionId = (String) VaadinSession.getCurrent().getAttribute("sessionId");
+        }
+        if (sessionId == null || sessionId.isBlank()) {
             sessionId = UUID.randomUUID().toString();
-            event.forwardTo("order?sessionId=" + sessionId);
-            return;
+            VaadinSession.getCurrent().setAttribute("sessionId", sessionId);
         }
 
         if (!customerService.exists(sessionId)) {
@@ -149,7 +175,7 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      * Loads a fresh conversation with a generic greeting.
      */
     private void loadConversation() {
-        addAssistantMessage("Halo! Mau pesan apa hari ini? Silakan ketik pesanmu.");
+        attachCategoryChips(addAssistantMessage("Halo! Mau pesan apa hari ini? Silakan pilih menu di bawah atau ketik pesanmu."));
     }
 
     /**
@@ -159,10 +185,147 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      */
     private void loadConversation(String customerName) {
         if (customerName != null && !customerName.isBlank()) {
-            addAssistantMessage("Halo " + customerName + "! Mau pesan apa hari ini? Silakan ketik pesanmu.");
+            attachCategoryChips(addAssistantMessage("Halo " + customerName + "! Mau pesan apa hari ini? Silakan pilih menu di bawah atau ketik pesanmu."));
         } else {
             loadConversation();
         }
+    }
+
+    /**
+     * Extends the greeting bubble with real menu categories fetched from the
+     * customer backend. Falls back to generic starter chips when the fetch fails.
+     *
+     * @param greeting the greeting bubble to decorate, or {@code null} if none rendered
+     */
+    private void attachCategoryChips(AiMessage greeting) {
+        if (greeting == null) {
+            return;
+        }
+        UI ui = UI.getCurrent();
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                Long customerSessionId = orderingService.ensureSession(sessionId);
+                if (customerSessionId == null) {
+                    return List.<CategoryRecommendation>of();
+                }
+                return categoryClient.getCategories(customerSessionId);
+            } catch (Exception ex) {
+                log.warn("Failed to load menu categories: {}", ex.getMessage());
+                return List.<CategoryRecommendation>of();
+            }
+        }, ioExecutor).thenAccept(categories -> {
+            if (ui == null) return;
+            ui.access(() -> {
+                if (categories == null || categories.isEmpty()) {
+                    withQuickReplies(greeting, "Lihat menu", "Menu kopi", "Menu non-kopi");
+                    return;
+                }
+                currentCategories = List.copyOf(categories);
+                List<String> chips = categories.stream()
+                        .map(CategoryRecommendation::name)
+                        .limit(MAX_CATEGORY_CHIPS)
+                        .toList();
+                greeting.addQuickReplies(chips, this::onCategoryQuickReply);
+                scrollToBottom();
+            });
+        });
+    }
+
+    /**
+     * Handles a tapped category chip: mirrors the selection in the chat, then
+     * lists that category's products as orderable quick-reply chips.
+     *
+     * @param categoryName the tapped category name
+     */
+    private void onCategoryQuickReply(String categoryName) {
+        if (chatInput.isWaitingForResponse()) {
+            return;
+        }
+        int categoryId = currentCategories.stream()
+                .filter(c -> c.name().equals(categoryName))
+                .findFirst()
+                .map(CategoryRecommendation::id)
+                .orElse(-1);
+
+        addUserMessage(categoryName);
+        typingIndicator.setVisible(true);
+        if (typingIndicator.getParent().isEmpty()) {
+            chatContainer.add(typingIndicator);
+        }
+        scrollToBottom();
+
+        UI ui = UI.getCurrent();
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                Long customerSessionId = orderingService.ensureSession(sessionId);
+                if (customerSessionId == null || categoryId <= 0) {
+                    return List.<ProductRecommendation>of();
+                }
+                return productClient.getByCategory(customerSessionId, categoryId);
+            } catch (Exception ex) {
+                log.warn("Failed to load products for category '{}': {}", categoryName, ex.getMessage());
+                return List.<ProductRecommendation>of();
+            }
+        }, ioExecutor).thenAccept(products -> {
+            if (ui == null) return;
+            ui.access(() -> {
+                typingIndicator.setVisible(false);
+                if (typingIndicator.getParent().isPresent()) chatContainer.remove(typingIndicator);
+
+                AiMessage ai;
+                if (products.isEmpty()) {
+                    ai = addAssistantMessage("Maaf, menu kategori **" + categoryName + "** belum tersedia.");
+                } else {
+                    String list = products.stream()
+                            .map(p -> "- " + p.name() + formatPrice(p.price()))
+                            .collect(Collectors.joining("\n"));
+                    ai = addAssistantMessage("Berikut produk di kategori **" + categoryName + "** — ketuk untuk memesan:\n\n" + list);
+                    if (ai != null) {
+                        attachProductChips(ai, products);
+                    }
+                }
+                withQuickReplies(ai, "Lihat menu lain", "Rekap pesanan");
+                scrollToBottom();
+            });
+        });
+    }
+
+    /**
+     * Adds orderable product chips to an assistant bubble: the chip label shows
+     * the product name (and price), while tapping it sends an order intent.
+     *
+     * @param ai       the bubble to decorate
+     * @param products the products to render as chips
+     */
+    private void attachProductChips(AiMessage ai, List<ProductRecommendation> products) {
+        List<QuickReplyChips.Reply> replies = products.stream()
+                .limit(MAX_PRODUCT_CHIPS)
+                .map(p -> new QuickReplyChips.Reply(p.name() + formatPrice(p.price()), "Saya mau pesan " + p.name()))
+                .toList();
+        ai.addQuickRepliesWithPayloads(replies, this::handleUserMessage);
+    }
+
+    /**
+     * Formats an optional product price for display.
+     *
+     * @param price the raw price string, possibly blank
+     * @return a formatted suffix, or an empty string when no price is present
+     */
+    private String formatPrice(String price) {
+        return (price != null && !price.isBlank()) ? " · " + price : "";
+    }
+
+    /**
+     * Attaches quick-reply suggestion chips to an assistant bubble.
+     *
+     * @param aiMessage the assistant bubble to extend (ignored if {@code null})
+     * @param replies   the chip labels to show
+     */
+    private void withQuickReplies(AiMessage aiMessage, String... replies) {
+        if (aiMessage == null || replies.length == 0) {
+            return;
+        }
+        aiMessage.addQuickReplies(List.of(replies), this::handleUserMessage);
     }
 
     /**
@@ -173,6 +336,9 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      * @param message the user's message text
      */
     private void handleUserMessage(String message) {
+        if (chatInput.isWaitingForResponse()) {
+            return;
+        }
         if (!customerService.exists(sessionId)) {
             showCustomerGate();
             return;
@@ -223,7 +389,8 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
                                 boolean isLeaked = isLeakedToolJson(finalTextSnapshot);
                                 String finalText = isLeaked ? "" : finalTextSnapshot;
                                 if (isLeaked) log.warn("Leaked tool JSON in stream error path, suppressing");
-                                addAssistantMessage(finalText.isBlank() ? fallbackText : finalText);
+                                AiMessage ai = addAssistantMessage(finalText.isBlank() ? fallbackText : finalText);
+                                withQuickReplies(ai, "Lihat menu lagi", "Rekap pesanan", "Selesai / bayar");
                                 chatInput.setWaitingForResponse(false);
                                 scrollToBottom();
                                 ui.push();
@@ -236,7 +403,8 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
                             boolean isLeaked = isLeakedToolJson(finalTextOrig);
                             String finalText = isLeaked ? "" : finalTextOrig;
                             if (isLeaked) log.warn("Leaked tool JSON in stream complete path, suppressing");
-                            addAssistantMessage(finalText.isBlank() ? "Maaf, tidak ada respons AI." : finalText);
+                            AiMessage ai = addAssistantMessage(finalText.isBlank() ? "Maaf, tidak ada respons AI." : finalText);
+                            withQuickReplies(ai, "Lihat menu lagi", "Rekap pesanan", "Selesai / bayar");
                             chatInput.setWaitingForResponse(false);
                             scrollToBottom();
                             ui.push();
@@ -259,12 +427,75 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      * and keeps only the final-channel text, then normalizes spacing.
      *
      * @param message the assistant's raw reply text
+     * @return the rendered bubble, or {@code null} if the sanitized text was blank
      */
-    private void addAssistantMessage(String message) {
-        if (message == null) return;
-        message = sanitizeAssistantText(message);
-        if (message.isBlank()) return;
-        chatContainer.add(new AiMessage(message));
+    private AiMessage addAssistantMessage(String message) {
+        if (message == null) return null;
+        String clean = sanitizeAssistantText(message);
+        if (clean.isBlank()) return null;
+        AiMessage ai = new AiMessage(clean);
+        chatContainer.add(ai);
+        attachLinkChips(ai, clean);
+        return ai;
+    }
+
+    /**
+     * Attaches quick-reply chips for any links mentioned in the assistant
+     * reply: markdown links ({@code [text](url)}) and bare {@code https://…}
+     * URLs. Tapping a chip sends the link's URL back to the AI as a message.
+     *
+     * @param ai   the bubble to decorate
+     * @param text the sanitized reply text to scan for links
+     */
+    private void attachLinkChips(AiMessage ai, String text) {
+        if (ai == null || text == null || text.isBlank()) {
+            return;
+        }
+        LinkedHashMap<String, String> labelByUrl = new LinkedHashMap<>();
+        java.util.regex.Matcher md = MARKDOWN_LINK.matcher(text);
+        while (md.find()) {
+            String label = md.group(1).trim();
+            String url = md.group(2).trim();
+            if (!label.isEmpty() && !url.isEmpty()) {
+                labelByUrl.putIfAbsent(url, label);
+            }
+        }
+        java.util.regex.Matcher bare = BARE_URL.matcher(text);
+        while (bare.find()) {
+            String url = bare.group().trim().replaceAll("[.,;:)]+$", "");
+            labelByUrl.putIfAbsent(url, safeHost(url));
+        }
+        if (labelByUrl.isEmpty()) {
+            return;
+        }
+        List<QuickReplyChips.Reply> links = labelByUrl.entrySet().stream()
+                .limit(4)
+                .map(e -> new QuickReplyChips.Reply(
+                        e.getValue().isBlank() ? safeHost(e.getKey()) : e.getValue(),
+                        e.getKey()))
+                .toList();
+        ai.addQuickRepliesWithPayloads(links, this::handleUserMessage);
+    }
+
+    /**
+     * Extracts a readable host name from a URL for bare-link chip labels.
+     *
+     * @param url the URL
+     * @return the host (minus the {@code www.} prefix), or the URL on failure
+     */
+    private String safeHost(String url) {
+        try {
+            String host = URI.create(url).getHost();
+            if (host == null || host.isBlank()) {
+                return url;
+            }
+            if (host.startsWith("www.")) {
+                host = host.substring(4);
+            }
+            return host;
+        } catch (Exception ex) {
+            return url;
+        }
     }
 
     /**
@@ -272,8 +503,9 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      * <p>
      * Removes Claude-style tool-call JSON ({@code {"name","arguments"}}), strips
      * control-token tool-call segments ({@code <|start|>...<|call|>}), keeps only
-     * the text of a trailing {@code final} channel, and drops any remnant of a
-     * {@code thinking} block.
+     * the text of a trailing {@code final} channel, drops any remnant of a
+     * {@code thinking} block, and hides internal category/product IDs so raw
+     * identifiers never reach the customer.
      *
      * @param message the raw model text
      * @return the clean, user-facing text
@@ -284,7 +516,108 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         java.util.regex.Matcher finalText = FINAL_TEXT.matcher(clean);
         if (finalText.find()) clean = finalText.group(1);
         clean = clean.replaceAll("(?s)thinking.*?response", "").trim();
+        clean = CATEGORY_PRODUCT_ID.matcher(clean).replaceAll("").trim();
+        clean = STANDALONE_ID.matcher(clean).replaceAll("").trim();
+        clean = stripIdColumn(clean);
+        clean = clean.replaceAll(" {2,}", " ").trim();
         return clean.replaceAll("([,;:])(?=[^\\s])", "$1 ").trim();
+    }
+
+    /**
+     * Removes an {@code ID} column from markdown pipe-tables in the reply.
+     * <p>
+     * The model sometimes echoes internal category/product tables including an
+     * {@code ID} column; this drops that column while keeping the meaningful
+     * columns (names, prices) intact.
+     *
+     * @param text the reply text
+     * @return the text with any {@code ID} table column removed
+     */
+    private String stripIdColumn(String text) {
+        String[] lines = text.split("\n", -1);
+        StringBuilder result = new StringBuilder();
+        int i = 0;
+        while (i < lines.length) {
+            if (!lines[i].trim().startsWith("|")) {
+                result.append(lines[i]).append('\n');
+                i++;
+                continue;
+            }
+            List<String> block = new ArrayList<>();
+            while (i < lines.length && lines[i].trim().startsWith("|")) {
+                block.add(lines[i]);
+                i++;
+            }
+            Integer idCol = null;
+            for (String row : block) {
+                List<String> cells = splitTableCells(row);
+                if (cells.isEmpty() || isSeparatorRow(cells)) continue;
+                for (int c = 0; c < cells.size(); c++) {
+                    if (ID_CELL.matcher(cells.get(c)).matches()) {
+                        idCol = c;
+                        break;
+                    }
+                }
+                if (idCol != null) break;
+            }
+            if (idCol == null) {
+                for (String row : block) result.append(row).append('\n');
+            } else {
+                for (String row : block) {
+                    List<String> cells = splitTableCells(row);
+                    if (idCol < cells.size()) {
+                        cells.remove(idCol);
+                    }
+                    result.append(rebuildTableRow(cells)).append('\n');
+                }
+            }
+        }
+        return result.toString().stripTrailing();
+    }
+
+    /**
+     * Splits a markdown pipe-table row into its cell texts, dropping the
+     * leading and trailing empty tokens produced by the outer pipes.
+     *
+     * @param row the raw table row
+     * @return the trimmed cell texts
+     */
+    private List<String> splitTableCells(String row) {
+        List<String> cells = new ArrayList<>();
+        for (String part : row.split("\\|", -1)) {
+            cells.add(part.trim());
+        }
+        if (!cells.isEmpty() && cells.get(0).isEmpty()) cells.remove(0);
+        if (!cells.isEmpty() && cells.get(cells.size() - 1).isEmpty()) cells.remove(cells.size() - 1);
+        return cells;
+    }
+
+    /**
+     * Rebuilds a pipe-table row from cell texts.
+     *
+     * @param cells the cell texts
+     * @return the row in markdown pipe-table form
+     */
+    private String rebuildTableRow(List<String> cells) {
+        if (cells.isEmpty()) {
+            return "| |";
+        }
+        return "| " + String.join(" | ", cells) + " |";
+    }
+
+    /**
+     * Detects whether a table row is a GFM column-alignment separator row.
+     *
+     * @param cells the row's cell texts
+     * @return {@code true} if every cell is an alignment marker or blank
+     */
+    private boolean isSeparatorRow(List<String> cells) {
+        for (String cell : cells) {
+            if (!SEPARATOR_CELL.matcher(cell).matches()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

@@ -14,6 +14,15 @@ import reactor.core.publisher.Flux;
 public interface OrderingService {
 
     /**
+     * Resolves the numeric customer-session id for the given Vaadin session,
+     * lazily creating the backend session if needed.
+     *
+     * @param sessionId the Vaadin session id
+     * @return the customer session id, or {@code null} when unavailable
+     */
+    Long ensureSession(String sessionId);
+
+    /**
      * Streams the assistant's reply for the given message.
      *
      * @param sessionId the Vaadin session id

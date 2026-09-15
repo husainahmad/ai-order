@@ -425,7 +425,35 @@ button:focus-visible {
   font-size: 0.6875rem;
   color: var(--color-text-tertiary);
   margin-top: var(--sp-1);
-  line-height: 1;
+}
+
+/* Quick-reply suggestion chips below assistant messages */
+.quick-reply-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.quick-reply-chip {
+  border-radius: var(--radius-full) !important;
+  font-size: 0.8125rem !important;
+  font-weight: 500 !important;
+  height: 32px !important;
+  padding: 0 var(--sp-4) !important;
+  background-color: var(--color-accent-light);
+  color: var(--color-accent-hover);
+  border: 1px solid transparent;
+  transition: background-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast) !important;
+}
+
+.quick-reply-chip:hover {
+  background-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.quick-reply-chip:active {
+  transform: scale(0.96);
 }
 
 .user-message .message-timestamp {
