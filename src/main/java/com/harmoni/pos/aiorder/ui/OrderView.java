@@ -439,6 +439,47 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
+     * Appends an assistant bubble and decorates it with optional menu
+     * shortcuts: recommended products and menu categories rendered as tappable
+     * chips below the message. Tapping a chip fills the composer so the
+     * customer can review and edit the draft before sending.
+     *
+     * @param message    the assistant's reply text
+     * @param products   recommended products to show as chips, or {@code null}
+     * @param categories menu categories to show as chips, or {@code null}
+     * @return the rendered bubble, or {@code null} if the sanitized text was blank
+     */
+    private AiMessage addAssistantMessage(String message, List<ProductRecommendation> products,
+                                          List<CategoryRecommendation> categories) {
+        AiMessage ai = addAssistantMessage(message);
+        if (ai == null) {
+            return null;
+        }
+        if (categories != null && !categories.isEmpty()) {
+            addCategoryChips(ai, categories);
+        }
+        if (products != null && !products.isEmpty()) {
+            attachProductChips(ai, products);
+        }
+        return ai;
+    }
+
+    /**
+     * Adds category shortcut chips below an assistant bubble: tapping a chip
+     * fills the composer with that category's name.
+     *
+     * @param ai         the bubble to decorate
+     * @param categories the categories to render as chips (not {@code null})
+     */
+    private void addCategoryChips(AiMessage ai, List<CategoryRecommendation> categories) {
+        List<QuickReplyChips.Reply> replies = categories.stream()
+                .limit(MAX_CATEGORY_CHIPS)
+                .map(c -> new QuickReplyChips.Reply(c.name(), c.name()))
+                .toList();
+        ai.addQuickRepliesWithPayloads(replies, this::fillInput);
+    }
+
+    /**
      * Attaches quick-reply chips for any links mentioned in the assistant
      * reply: markdown links ({@code [text](url)}) and bare {@code https://…}
      * URLs. Tapping a chip sends the link's URL back to the AI as a message.
