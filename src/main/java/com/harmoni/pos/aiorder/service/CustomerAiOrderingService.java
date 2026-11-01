@@ -1,7 +1,9 @@
 package com.harmoni.pos.aiorder.service;
 
 import com.harmoni.pos.aiorder.client.AiChatClient;
+import com.harmoni.pos.aiorder.client.CartClient;
 import com.harmoni.pos.aiorder.client.SessionClient;
+import com.harmoni.pos.aiorder.cart.dto.AddCartItemRequest;
 import com.harmoni.pos.aiorder.dto.ChatResponse;
 import com.vaadin.flow.server.VaadinSession;
 import lombok.RequiredArgsConstructor;
@@ -11,15 +13,6 @@ import reactor.core.publisher.Flux;
 
 import java.util.List;
 
-/**
- * Default {@link OrderingService} that talks to the customer backend over HTTP.
- * <p>
- * Resolves the customer session id from the {@link VaadinSession} — creating the
- * backend session lazily on the first message — then forwards the user's message
- * to the AI chat endpoints and exposes the reply as a reactive stream.
- *
- * @author Husain Harmoni
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -28,6 +21,7 @@ public class CustomerAiOrderingService implements OrderingService {
     private final AiChatClient aiChatClient;
     private final SessionClient sessionClient;
     private final CustomerService customerService;
+    private final CartClient cartClient;
 
     @Override
     public Long ensureSession(String vaadinSessionId) {
@@ -42,7 +36,7 @@ public class CustomerAiOrderingService implements OrderingService {
         }
         var aiMsg = aiChatClient.chat(customerSessionId, message);
         String text = aiMsg != null && aiMsg.message() != null ? aiMsg.message() : "Maaf, tidak ada respons AI.";
-        return new ChatResponse(text, List.of(), List.of());
+        return new ChatResponse(text, List.of(), List.of(), List.of());
     }
 
     @Override
@@ -56,15 +50,13 @@ public class CustomerAiOrderingService implements OrderingService {
                 .doOnError(e -> log.error("Stream error vaadin={}: {}", vaadinSessionId, e.getMessage(), e));
     }
 
-    /**
-     * Resolves the customer session id for the current Vaadin session.
-     * <p>
-     * Reuses a cached value, or lazily creates a new customer session via the
-     * backend the first time and caches it for subsequent messages.
-     *
-     * @param vaadinSessionId the Vaadin session id (used for logging)
-     * @return the numeric customer session id, or {@code null} when unavailable
-     */
+    public Object addToCart(Long sessionId, AddCartItemRequest request) {
+        log.info("Add to cart sessionId={} productId={} skuId={} qty={} customizations={}",
+                sessionId, request.getProductId(), request.getSkuId(), request.getQuantity(),
+                request.getCustomizations() != null ? request.getCustomizations().size() : 0);
+        return cartClient.addItem(sessionId, request);
+    }
+
     private Long resolveCustomerSessionId(String vaadinSessionId) {
         VaadinSession vs = VaadinSession.getCurrent();
         if (vs == null) return null;

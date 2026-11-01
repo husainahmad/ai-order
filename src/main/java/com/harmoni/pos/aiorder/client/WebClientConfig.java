@@ -10,14 +10,6 @@ import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
 
-/**
- * Builds the reactive {@link WebClient} used to call the customer backend.
- * <p>
- * Applies the configured base URL, connect/response timeouts, and a larger
- * in-memory buffer so large menu payloads are not truncated.
- *
- * @author Husain Harmoni
- */
 @Configuration
 public class WebClientConfig {
 
@@ -40,6 +32,33 @@ public class WebClientConfig {
 
         return WebClient.builder()
                 .baseUrl(properties.baseUrl())
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .exchangeStrategies(strategies)
+                .build();
+    }
+
+    /**
+     * Creates a WebClient specific for cart operations.
+     * <p>
+     * Cart calls may have different timeout requirements or need to hit a different
+     * backend URL (e.g., separated service). Currently reuses the same base URL.
+     *
+     * @param cartProperties the cart API configuration
+     * @return a WebClient configured for cart API calls
+     */
+    @Bean
+    public WebClient cartWebClient(CartApiProperties cartProperties) {
+
+        HttpClient httpClient = HttpClient.create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, cartProperties.getTimeoutMs())
+                .responseTimeout(Duration.ofMillis(cartProperties.getTimeoutMs()));
+
+        ExchangeStrategies strategies = ExchangeStrategies.builder()
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(2 * 1024 * 1024))
+                .build();
+
+        return WebClient.builder()
+                .baseUrl(cartProperties.getUrl())
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .exchangeStrategies(strategies)
                 .build();

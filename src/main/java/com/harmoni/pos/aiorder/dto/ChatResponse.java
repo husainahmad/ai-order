@@ -8,8 +8,18 @@ import java.util.List;
  * Carries the assistant's reply text together with any recommended
  * products or categories attached to the reply.
  *
- * @param message    the assistant's reply text
- * @param products   recommended products, possibly empty
- * @param categories recommended categories, possibly empty
+ * @param message        the assistant's reply text
+ * @param products       recommended products, possibly empty
+ * @param categories     recommended categories, possibly empty
+ * @param customizations customization groups relevant to the reply, possibly empty
  */
-public record ChatResponse(String message, List<ProductRecommendation> products, List<CategoryRecommendation> categories) {}
+public record ChatResponse(
+        String message,
+        List<ProductRecommendation> products,
+        List<CategoryRecommendation> categories,
+        List<Customization> customizations
+) {
+    public ChatResponse(String message, List<ProductRecommendation> products, List<CategoryRecommendation> categories) {
+        this(message, products, categories, List.of());
+    }
+}

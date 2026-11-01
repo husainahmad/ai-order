@@ -3,6 +3,7 @@ package com.harmoni.pos.aiorder.ui;
 import com.harmoni.pos.aiorder.client.CategoryClient;
 import com.harmoni.pos.aiorder.client.ProductClient;
 import com.harmoni.pos.aiorder.dto.CategoryRecommendation;
+import com.harmoni.pos.aiorder.dto.Customization;
 import com.harmoni.pos.aiorder.dto.CustomerResponse;
 import com.harmoni.pos.aiorder.dto.ProductRecommendation;
 import com.harmoni.pos.aiorder.service.CustomerService;
@@ -277,7 +278,8 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     /**
      * Adds product chips to an assistant bubble: the chip label shows the
      * product name (and price), while tapping it fills the composer with an
-     * order intent.
+     * order intent. If the product has customizations, include guidance in the
+     * draft message.
      *
      * @param ai       the bubble to decorate
      * @param products the products to render as chips
@@ -285,7 +287,33 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     private void attachProductChips(AiMessage ai, List<ProductRecommendation> products) {
         List<QuickReplyChips.Reply> replies = products.stream()
                 .limit(MAX_PRODUCT_CHIPS)
-                .map(p -> new QuickReplyChips.Reply(p.name() + formatPrice(p.price()), "Saya mau pesan " + p.name()))
+                .map(p -> {
+                    String base = "Saya mau pesan " + p.name();
+                    if (p.customizations() != null && !p.customizations().isEmpty()) {
+                        StringBuilder sb = new StringBuilder(base);
+                        p.customizations().forEach(c -> {
+                            if (c != null && c.name() != null && !c.name().isBlank()) {
+                                sb.append(" (").append(c.name());
+                                if (c.options() != null && !c.options().isEmpty()) {
+                                    sb.append(": ");
+                                    String opts = c.options().stream()
+                                            .filter(o -> o != null && o.name() != null)
+                                            .limit(3)
+                                            .map(o -> o.name() + (o.price() != null && !o.price().isBlank() ? " +" + o.price() : ""))
+                                            .reduce((a, b) -> a + ", " + b)
+                                            .orElse("");
+                                    sb.append(opts);
+                                    if (c.options().size() > 3) {
+                                        sb.append(", ...");
+                                    }
+                                }
+                                sb.append(")");
+                            }
+                        });
+                        base = sb.toString();
+                    }
+                    return new QuickReplyChips.Reply(p.name() + formatPrice(p.price()), base);
+                })
                 .toList();
         ai.addQuickRepliesWithPayloads(replies, this::fillInput);
     }
@@ -444,13 +472,15 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      * chips below the message. Tapping a chip fills the composer so the
      * customer can review and edit the draft before sending.
      *
-     * @param message    the assistant's reply text
-     * @param products   recommended products to show as chips, or {@code null}
-     * @param categories menu categories to show as chips, or {@code null}
+     * @param message        the assistant's reply text
+     * @param products       recommended products to show as chips, or {@code null}
+     * @param categories     menu categories to show as chips, or {@code null}
+     * @param customizations customization groups to show as chips, or {@code null}
      * @return the rendered bubble, or {@code null} if the sanitized text was blank
      */
     private AiMessage addAssistantMessage(String message, List<ProductRecommendation> products,
-                                          List<CategoryRecommendation> categories) {
+                                          List<CategoryRecommendation> categories,
+                                          List<Customization> customizations) {
         AiMessage ai = addAssistantMessage(message);
         if (ai == null) {
             return null;
@@ -461,7 +491,55 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         if (products != null && !products.isEmpty()) {
             attachProductChips(ai, products);
         }
+        if (customizations != null && !customizations.isEmpty()) {
+            addCustomizationChips(ai, customizations);
+        }
         return ai;
+    }
+
+    private AiMessage addAssistantMessage(String message, List<ProductRecommendation> products,
+                                          List<CategoryRecommendation> categories) {
+        return addAssistantMessage(message, products, categories, null);
+    }
+
+    private void addCustomizationChips(AiMessage ai, List<Customization> customizations) {
+        List<QuickReplyChips.Reply> replies = customizations.stream()
+                .filter(c -> c != null && c.name() != null && !c.name().isBlank())
+                .limit(MAX_CATEGORY_CHIPS)
+                .map(c -> {
+                    StringBuilder sb = new StringBuilder();
+                    if (c.options() != null && !c.options().isEmpty()) {
+                        String opts = c.options().stream()
+                                .filter(o -> o != null && o.name() != null)
+                                .limit(4)
+                                .map(o -> o.name() + (o.price() != null && !o.price().isBlank() ? " +" + o.price() : ""))
+                                .reduce((a, b) -> a + ", " + b)
+                                .orElse("");
+                        sb.append(c.name()).append(": ").append(opts);
+                        if (c.options().size() > 4) {
+                            sb.append(", ...");
+                        }
+                    } else {
+                        sb.append(c.name());
+                    }
+                    String label = sb.toString();
+                    String payload = "Pilih " + c.name() + (c.options() != null && !c.options().isEmpty()
+                            ? ": " + c.options().stream()
+                            .filter(o -> o != null && o.name() != null)
+                            .map(o -> o.name())
+                            .limit(3)
+                            .reduce((a, b) -> a + ", " + b)
+                            .orElse("")
+                            : "");
+                    if (payload.length() > 120) {
+                        payload = "Pilih " + c.name();
+                    }
+                    return new QuickReplyChips.Reply(label, payload);
+                })
+                .toList();
+        if (!replies.isEmpty()) {
+            ai.addQuickRepliesWithPayloads(replies, this::fillInput);
+        }
     }
 
     /**

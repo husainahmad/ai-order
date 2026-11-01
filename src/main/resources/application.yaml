@@ -17,3 +17,7 @@ customer:
     sessions-path: /api/v1/customer-sessions
     timeout-ms: 60000
     source: AI_CHAT
+    cart:
+      url: http://localhost:8084
+      base-path: /api/v1/customer-sessions
+      add-item-path: /cart/items
