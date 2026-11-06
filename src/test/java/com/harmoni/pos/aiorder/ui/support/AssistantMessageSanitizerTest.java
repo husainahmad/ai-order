@@ -162,4 +162,42 @@ class AssistantMessageSanitizerTest {
             assertThat(AssistantMessageSanitizer.sanitize(null)).isEmpty();
         }
     }
+
+    @Nested
+    @DisplayName("ID column replacement")
+    class IdColumnReplacement {
+
+        @Test
+        @DisplayName("replaces ID column with sequence numbers in a tab-separated table")
+        void replacesIdWithSequenceInTabTable() {
+            String input = "ID\tNama Kategori\n13\tCoffee\n14\tNon Coffee\n15\tSnack\n16\tFood\n17\tBrewed\n18\tAdditional";
+
+            String result = AssistantMessageSanitizer.addSequenceNumbers(input);
+
+            assertThat(result)
+                    .contains("1\tNama Kategori")
+                    .contains("2\tCoffee")
+                    .contains("3\tNon Coffee")
+                    .contains("4\tSnack")
+                    .contains("5\tFood")
+                    .contains("6\tBrewed")
+                    .contains("7\tAdditional")
+                    .doesNotContain("13\t")
+                    .doesNotContain("14\t")
+                    .doesNotContain("15\t")
+                    .doesNotContain("16\t")
+                    .doesNotContain("17\t")
+                    .doesNotContain("18\t");
+        }
+
+        @Test
+        @DisplayName("leaves a table without an ID column unchanged")
+        void leavesNoIdTableUnchanged() {
+            String input = "| Kategori | Harga |\n|----------|-------|\n| Kopi | 18.000 |";
+
+            String result = AssistantMessageSanitizer.addSequenceNumbers(input);
+
+            assertThat(result).isEqualTo(input);
+        }
+    }
 }

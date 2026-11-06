@@ -112,6 +112,36 @@ public final class AssistantMessageSanitizer {
      * @return the text with any {@code ID} table column removed
      */
     private static String stripIdColumn(String text) {
+        return addSequenceNumbers(text);
+    }
+
+    /**
+     * Replaces an {@code ID} column in tables with a clean sequence number (1, 2, 3...).
+     * <p>
+     * Unlike {@link #stripIdColumn(String)}, this does not remove the column — it preserves
+     * the table structure but replaces the internal IDs with user-friendly ordinal numbers.
+     * This is ideal for menu categories or products shown to customers.
+     * <p>
+     * Works for all three table shapes (pipe, tab, column-aligned). If no ID column is found,
+     * the text is returned unchanged.
+     *
+     * @param text the reply text
+     * @return the text with any {@code ID} column replaced by sequential numbers
+     */
+    /**
+     * Replaces an {@code ID} column in tables with a clean sequence number (1, 2, 3...).
+     * <p>
+     * Unlike {@link #stripIdColumn(String)}, this does not remove the column — it preserves
+     * the table structure but replaces the internal IDs with user-friendly ordinal numbers.
+     * This is ideal for menu categories or products shown to customers.
+     * <p>
+     * Works for all three table shapes (pipe, tab, column-aligned). If no ID column is found,
+     * the text is returned unchanged.
+     *
+     * @param text the reply text
+     * @return the text with any {@code ID} column replaced by sequential numbers
+     */
+    public static String addSequenceNumbers(String text) {
         String[] lines = text.split("\n", -1);
         StringBuilder result = new StringBuilder();
         int i = 0;
@@ -137,10 +167,11 @@ public final class AssistantMessageSanitizer {
                 }
                 continue;
             }
+            int seq = 1;
             for (String row : block) {
                 List<String> cells = splitCells(row, delimiter);
                 if (idCol < cells.size()) {
-                    cells.remove(idCol);
+                    cells.set(idCol, String.valueOf(seq++));
                 }
                 result.append(rebuildRow(cells, delimiter)).append('\n');
             }
@@ -257,4 +288,18 @@ public final class AssistantMessageSanitizer {
         }
         return true;
     }
+
+    /**
+     * Replaces an {@code ID} column in tables with a clean sequence number (1, 2, 3...).
+     * <p>
+     * Unlike {@link #stripIdColumn(String)}, this does not remove the column — it preserves
+     * the table structure but replaces the internal IDs with user-friendly ordinal numbers.
+     * This is ideal for menu categories or products shown to customers.
+     * <p>
+     * Works for all three table shapes (pipe, tab, column-aligned). If no ID column is found,
+     * the text is returned unchanged.
+     *
+     * @param text the reply text
+     * @return the text with any {@code ID} column replaced by sequential numbers
+     */
 }
