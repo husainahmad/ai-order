@@ -52,11 +52,35 @@ public final class AssistantMessageSanitizer {
             clean = finalText.group(1);
         }
         clean = clean.replaceAll("(?s)thinking.*?response", "").trim();
-        clean = CATEGORY_PRODUCT_ID.matcher(clean).replaceAll("").trim();
-        clean = STANDALONE_ID.matcher(clean).replaceAll("").trim();
+        // Skip ID removal in table rows: only remove IDs from prose.
+        clean = removeIdsFromProse(clean);
         clean = stripIdColumn(clean);
         clean = clean.replaceAll(" {2,}", " ").trim();
         return clean.replaceAll("([,;:])(?=[^\\s])", "$1 ").trim();
+    }
+
+    /**
+     * Removes standalone ID mentions from prose, skipping table rows entirely.
+     * <p>
+     * The model sometimes echoes internal IDs in plain sentences. This removes them,
+     * but only when they appear outside of table structures, so the column-stripping
+     * logic remains the sole authority over tables.
+     *
+     * @param text the text to sanitize
+     * @return the sanitized text
+     */
+    private static String removeIdsFromProse(String text) {
+        String[] lines = text.split("\n", -1);
+        StringBuilder result = new StringBuilder();
+        for (String line : lines) {
+            if (tableDelimiter(line) == null) {
+                // Not a table row: safe to strip IDs.
+                line = CATEGORY_PRODUCT_ID.matcher(line).replaceAll("").trim();
+                line = STANDALONE_ID.matcher(line).replaceAll("").trim();
+            }
+            result.append(line).append('\n');
+        }
+        return result.toString().stripTrailing();
     }
 
     /**
@@ -187,7 +211,10 @@ public final class AssistantMessageSanitizer {
      */
     private static List<String> splitCells(String row, String delimiter) {
         List<String> cells = new ArrayList<>();
-        for (String part : row.trim().split(delimiter, -1)) {
+        // Split the trimmed row so the outer pipes become the empty first and last tokens,
+        // which are then dropped below. Trimming before splitting is what makes a pipe
+        // table work: "| ID | Kategori |" -> ["", " ID ", " Kategori ", ""].
+        for (String part : row.trim().split(Pattern.quote(delimiter), -1)) {
             cells.add(part.trim());
         }
         if ("|".equals(delimiter)) {
