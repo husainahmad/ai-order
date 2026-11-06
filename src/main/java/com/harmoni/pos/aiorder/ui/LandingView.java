@@ -1,6 +1,6 @@
 package com.harmoni.pos.aiorder.ui;
 
-import com.harmoni.pos.aiorder.ui.component.CustomerGateDialog;
+import com.harmoni.pos.aiorder.ui.component.CustomerGateCard;
 import com.harmoni.pos.aiorder.dto.CustomerResponse;
 import com.harmoni.pos.aiorder.service.CustomerService;
 import com.vaadin.flow.component.UI;
@@ -27,10 +27,12 @@ import java.util.UUID;
  * On first visit, resolves or generates a {@code sessionId} and checks whether the
  * customer is already registered via {@link CustomerService#exists(String)}.
  * If registered, immediately forwards to {@code /order?sessionId=xxx}.
- * Otherwise, opens a {@link CustomerGateDialog} for phone-based login/registration.
+ * Otherwise, shows a {@link CustomerGateCard} in place of the page content.
  * <p>
- * Shows a centered loading spinner while resolving, and a recoverable error state
- * with a retry button if the customer service is unavailable or the dialog is dismissed.
+ * The sign-in card is the page, not a layer over it: there is nothing here to go back to,
+ * and a modal would put a dismissable surface over an empty screen. Shows a centered
+ * loading spinner while resolving, and a recoverable error state with a retry button if the
+ * customer service is unavailable.
  *
  * @author Husain Harmoni
  */
@@ -45,10 +47,9 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     private final Environment environment;
 
     private String sessionId;
-    private boolean gateShown = false;
-    private boolean gateSuccess = false;
     private VerticalLayout loadingState;
     private VerticalLayout errorState;
+    private CustomerGateCard gateCard;
 
     {
         addClassName("landing-view");
@@ -72,7 +73,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
     /**
      * Pre-navigation hook that resolves the session and decides whether to forward
-     * to the order view or show the customer gate dialog.
+     * to the order view or show the sign-in card.
      * <p>
      * Session ID resolution order: URL parameter &gt; VaadinSession attribute &gt; new UUID.
      * If the customer service is unreachable, displays an error state instead.
@@ -106,29 +107,26 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
             return;
         }
 
-        if (!gateShown) {
-            gateShown = true;
-            event.getUI().access(() -> showCustomerGate());
-        }
+        showSignIn();
     }
 
     /**
-     * Opens the {@link CustomerGateDialog} for phone-based login or registration.
-     * If the dialog is closed without success, transitions to the error state.
+     * Puts the sign-in card on the page in place of the loading spinner.
+     * <p>
+     * Rebuilt each time rather than reused, so a retry starts from an empty phone field
+     * instead of whatever a previous failed attempt left behind.
      */
-    private void showCustomerGate() {
+    private void showSignIn() {
         clearError();
-        gateSuccess = false;
-        CustomerGateDialog dialog = new CustomerGateDialog(sessionId, environment.getProperty("app.store-name", "Kopi Harmoni"), customerService, validator, customer -> {
-            gateSuccess = true;
-            onCustomerRegistered(customer);
-        });
-        dialog.open();
-        dialog.addOpenedChangeListener(e -> {
-            if (!e.isOpened() && !gateSuccess) {
-                showGateError("Anda harus masuk untuk memesan. Periksa koneksi lalu coba lagi.");
-            }
-        });
+        removeAll();
+        gateCard = new CustomerGateCard(
+                sessionId,
+                environment.getProperty("app.store-name", "Kopi Harmoni"),
+                customerService,
+                validator,
+                this::onCustomerRegistered);
+        add(gateCard);
+        gateCard.focusFirstField();
     }
 
     /**
@@ -155,7 +153,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      */
     private void showGateError(String text) {
         clearError();
-        remove(loadingState);
+        removeAll();
 
         errorState = new VerticalLayout();
         errorState.addClassName("landing-error");
@@ -165,7 +163,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         Span message = new Span(text);
         message.addClassName("landing-error-text");
 
-        Button retry = new Button("Coba Lagi", e -> showCustomerGate());
+        Button retry = new Button("Coba Lagi", e -> showSignIn());
         retry.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
         errorState.add(message, retry);

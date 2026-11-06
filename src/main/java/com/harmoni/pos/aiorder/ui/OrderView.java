@@ -4,7 +4,6 @@ import com.harmoni.pos.aiorder.client.CategoryClient;
 import com.harmoni.pos.aiorder.client.ProductClient;
 import com.harmoni.pos.aiorder.dto.CategoryRecommendation;
 import com.harmoni.pos.aiorder.dto.Customization;
-import com.harmoni.pos.aiorder.dto.CustomerResponse;
 import com.harmoni.pos.aiorder.dto.ProductRecommendation;
 import com.harmoni.pos.aiorder.service.CustomerService;
 import com.harmoni.pos.aiorder.service.OrderingService;
@@ -38,7 +37,8 @@ import java.util.regex.Pattern;
  * <p>
  * Streaming replies are rendered incrementally via the {@link TypingIndicator}
  * and assistant bubbles. If no customer is linked to the {@link VaadinSession},
- * the {@link CustomerGateDialog} blocks the chat until the customer registers.
+ * a customer is linked, the chat is unusable and the visitor is sent to the landing page
+ * to sign in.
  *
  * @author Husain Harmoni
  */
@@ -134,7 +134,7 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         if (!customerService.exists(sessionId)) {
             chatContainer.removeAll();
             chatInput.setEnabled(false);
-            showCustomerGate();
+            redirectToSignIn();
         } else {
             customerService.getCustomerResponse(sessionId).ifPresent(cr -> {
                 VaadinSession.getCurrent().setAttribute("customerId", cr.id());
@@ -148,27 +148,17 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
-     * Opens the customer registration dialog to gate the chat.
+     * Sends an unauthenticated visitor to the landing page to sign in.
+     * <p>
+     * Sign-in lives on the landing page, as the page itself rather than a layer over the
+     * chat. Sending the visitor there keeps one implementation of the form and means the
+     * chat never renders behind a modal it cannot control.
      */
-    private void showCustomerGate() {
-        CustomerGateDialog dialog = new CustomerGateDialog(sessionId, environment.getProperty("app.store-name", "Kopi Harmoni"), customerService, validator, this::onCustomerRegistered);
-        dialog.open();
-    }
-
-    /**
-     * Callback invoked once a customer is resolved through the gate dialog.
-     * Enables the composer, greets the customer, and binds the customer to the
-     * current Vaadin session.
-     *
-     * @param customer the resolved customer
-     */
-    private void onCustomerRegistered(CustomerResponse customer) {
-        chatInput.setEnabled(true);
-        chatContainer.removeAll();
-        VaadinSession.getCurrent().setAttribute("customerId", customer.id());
-        VaadinSession.getCurrent().setAttribute("customerResponse", customer);
-        loadConversation(customer.name());
-        chatInput.focus();
+    private void redirectToSignIn() {
+        UI ui = UI.getCurrent();
+        if (ui != null) {
+            ui.navigate("");
+        }
     }
 
     /**
@@ -367,7 +357,7 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
             return;
         }
         if (!customerService.exists(sessionId)) {
-            showCustomerGate();
+            redirectToSignIn();
             return;
         }
 
@@ -642,11 +632,22 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
-     * Removes an {@code ID} column from markdown pipe-tables in the reply.
+     * Removes an {@code ID} column from tables in the reply.
      * <p>
-     * The model sometimes echoes internal category/product tables including an
-     * {@code ID} column; this drops that column while keeping the meaningful
-     * columns (names, prices) intact.
+     * The model sometimes echoes internal category/product tables including an {@code ID}
+     * column. Those identifiers are the menu service's business, not the customer's, so the
+     * column is dropped while the meaningful ones (names, prices) are kept.
+     * <p>
+     * Three table shapes are recognised, because the model emits all of them:
+     * <ul>
+     *   <li><strong>pipe</strong> — {@code | ID | Kategori |}, the markdown form;</li>
+     *   <li><strong>tab</strong> — {@code ID\tKategori}, which is what a tool result copied
+     *       verbatim looks like;</li>
+     *   <li><strong>column-aligned</strong> — {@code ID   Kategori} with runs of spaces,
+     *       which is how the model reflows a table when it "tidies" it.</li>
+     * </ul>
+     * A block only counts as a table when its first row has a cell reading exactly
+     * {@code ID}, so ordinary prose containing the word is left alone.
      *
      * @param text the reply text
      * @return the text with any {@code ID} table column removed
@@ -656,71 +657,121 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         StringBuilder result = new StringBuilder();
         int i = 0;
         while (i < lines.length) {
-            if (!lines[i].trim().startsWith("|")) {
-                result.append(lines[i]).append('\n');
+            String line = lines[i];
+            String delimiter = tableDelimiter(line);
+            if (delimiter == null) {
+                result.append(line).append('\n');
                 i++;
                 continue;
             }
+
+            // Collect the whole contiguous table: rows using the same delimiter.
             List<String> block = new ArrayList<>();
-            while (i < lines.length && lines[i].trim().startsWith("|")) {
+            while (i < lines.length && tableDelimiter(lines[i]) != null
+                    && tableDelimiter(lines[i]).equals(delimiter)) {
                 block.add(lines[i]);
                 i++;
             }
-            Integer idCol = null;
-            for (String row : block) {
-                List<String> cells = splitTableCells(row);
-                if (cells.isEmpty() || isSeparatorRow(cells)) continue;
-                for (int c = 0; c < cells.size(); c++) {
-                    if (ID_CELL.matcher(cells.get(c)).matches()) {
-                        idCol = c;
-                        break;
-                    }
-                }
-                if (idCol != null) break;
-            }
-            if (idCol == null) {
+
+            int idCol = findIdColumn(block, delimiter);
+            if (idCol < 0) {
                 for (String row : block) result.append(row).append('\n');
-            } else {
-                for (String row : block) {
-                    List<String> cells = splitTableCells(row);
-                    if (idCol < cells.size()) {
-                        cells.remove(idCol);
-                    }
-                    result.append(rebuildTableRow(cells)).append('\n');
+                continue;
+            }
+            for (String row : block) {
+                List<String> cells = splitCells(row, delimiter);
+                if (isSeparatorRow(cells)) {
+                    // Keep the alignment row, minus the dropped column.
+                    if (idCol < cells.size()) cells.remove(idCol);
+                    result.append(rebuildRow(cells, delimiter)).append('\n');
+                    continue;
                 }
+                if (idCol < cells.size()) cells.remove(idCol);
+                result.append(rebuildRow(cells, delimiter)).append('\n');
             }
         }
         return result.toString().stripTrailing();
     }
 
     /**
-     * Splits a markdown pipe-table row into its cell texts, dropping the
-     * leading and trailing empty tokens produced by the outer pipes.
+     * Identifies the delimiter a table row uses, or {@code null} when the line is not a row.
+     * <p>
+     * Pipes win when present, since a markdown table may also contain tabs inside a cell.
+     * The space form requires at least two spaces between columns, which distinguishes a
+     * table row from a sentence with a double space in it.
      *
-     * @param row the raw table row
-     * @return the trimmed cell texts
+     * @param line the line to inspect
+     * @return the delimiter to split on, or {@code null}
      */
-    private List<String> splitTableCells(String row) {
+    private static String tableDelimiter(String line) {
+        String trimmed = line.trim();
+        if (trimmed.isEmpty()) return null;
+        if (trimmed.startsWith("|")) return "|";
+        if (trimmed.contains("\t")) return "\t";
+        // Two or more spaces between two non-space runs: a column-aligned row.
+        if (trimmed.matches(".*\\S {2,}\\S.*")) return " {2,}";
+        return null;
+    }
+
+    /**
+     * Finds the index of the {@code ID} column in a table block, or {@code -1}.
+     * <p>
+     * Only the first non-separator row is examined, which is the header in every table the
+     * model produces. Scanning every row would let a data cell that happens to read "ID"
+     * drop the wrong column.
+     *
+     * @param block     the table rows
+     * @param delimiter the delimiter the rows use
+     * @return the column index, or {@code -1} when there is no ID column
+     */
+    private static int findIdColumn(List<String> block, String delimiter) {
+        for (String row : block) {
+            List<String> cells = splitCells(row, delimiter);
+            if (cells.isEmpty() || isSeparatorRow(cells)) continue;
+            for (int c = 0; c < cells.size(); c++) {
+                if (ID_CELL.matcher(cells.get(c)).matches()) {
+                    return c;
+                }
+            }
+            return -1;
+        }
+        return -1;
+    }
+
+    /**
+     * Splits a table row into its cell texts for the given delimiter.
+     *
+     * @param row       the raw row
+     * @param delimiter the delimiter to split on
+     * @return the trimmed cells, without the empty outer cells a pipe table produces
+     */
+    private static List<String> splitCells(String row, String delimiter) {
         List<String> cells = new ArrayList<>();
-        for (String part : row.split("\\|", -1)) {
+        for (String part : row.trim().split(delimiter, -1)) {
             cells.add(part.trim());
         }
-        if (!cells.isEmpty() && cells.get(0).isEmpty()) cells.remove(0);
-        if (!cells.isEmpty() && cells.get(cells.size() - 1).isEmpty()) cells.remove(cells.size() - 1);
+        if ("|".equals(delimiter)) {
+            if (!cells.isEmpty() && cells.get(0).isEmpty()) cells.remove(0);
+            if (!cells.isEmpty() && cells.get(cells.size() - 1).isEmpty()) {
+                cells.remove(cells.size() - 1);
+            }
+        }
         return cells;
     }
 
     /**
-     * Rebuilds a pipe-table row from cell texts.
+     * Rebuilds a row from its cells, in the same shape it arrived in.
      *
-     * @param cells the cell texts
-     * @return the row in markdown pipe-table form
+     * @param cells     the remaining cells
+     * @param delimiter the delimiter the table uses
+     * @return the rebuilt row
      */
-    private String rebuildTableRow(List<String> cells) {
-        if (cells.isEmpty()) {
-            return "| |";
-        }
-        return "| " + String.join(" | ", cells) + " |";
+    private static String rebuildRow(List<String> cells, String delimiter) {
+        return switch (delimiter) {
+            case "|" -> cells.isEmpty() ? "| |" : "| " + String.join(" | ", cells) + " |";
+            case "\t" -> String.join("\t", cells);
+            default -> String.join("   ", cells);
+        };
     }
 
     /**
@@ -729,7 +780,7 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      * @param cells the row's cell texts
      * @return {@code true} if every cell is an alignment marker or blank
      */
-    private boolean isSeparatorRow(List<String> cells) {
+    private static boolean isSeparatorRow(List<String> cells) {
         for (String cell : cells) {
             if (!SEPARATOR_CELL.matcher(cell).matches()) {
                 return false;
