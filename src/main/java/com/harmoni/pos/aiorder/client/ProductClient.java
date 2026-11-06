@@ -1,6 +1,5 @@
 package com.harmoni.pos.aiorder.client;
 
-import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import com.harmoni.pos.aiorder.dto.Customization;
 import com.harmoni.pos.aiorder.dto.CustomizationOption;

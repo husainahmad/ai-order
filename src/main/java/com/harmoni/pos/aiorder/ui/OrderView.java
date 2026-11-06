@@ -3,11 +3,12 @@ package com.harmoni.pos.aiorder.ui;
 import com.harmoni.pos.aiorder.client.CategoryClient;
 import com.harmoni.pos.aiorder.client.ProductClient;
 import com.harmoni.pos.aiorder.dto.CategoryRecommendation;
-import com.harmoni.pos.aiorder.dto.Customization;
 import com.harmoni.pos.aiorder.dto.ProductRecommendation;
 import com.harmoni.pos.aiorder.service.CustomerService;
 import com.harmoni.pos.aiorder.service.OrderingService;
 import com.harmoni.pos.aiorder.ui.component.*;
+import com.harmoni.pos.aiorder.ui.support.AssistantMessageSanitizer;
+import com.harmoni.pos.aiorder.ui.support.MenuChipFactory;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.orderedlayout.Scroller;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
@@ -15,29 +16,26 @@ import com.vaadin.flow.router.BeforeEnterEvent;
 import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.VaadinSession;
-import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Pattern;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Main chat view for ordering: a header, a scrollable conversation, and a
  * message composer at the bottom.
  * <p>
  * Streaming replies are rendered incrementally via the {@link TypingIndicator}
- * and assistant bubbles. If no customer is linked to the {@link VaadinSession},
- * a customer is linked, the chat is unusable and the visitor is sent to the landing page
+ * and assistant bubbles. The chat is unusable until a customer is linked to the
+ * {@link VaadinSession}; an unauthenticated visitor is sent to the landing page
  * to sign in.
  *
  * @author Husain Harmoni
@@ -47,25 +45,18 @@ import java.util.regex.Pattern;
 public class OrderView extends VerticalLayout implements BeforeEnterObserver {
 
     private static final Logger log = LoggerFactory.getLogger(OrderView.class);
-    private static final Pattern LEAKED_TOOL_CALL = Pattern.compile("\\{\\s*\"name\"\\s*:\\s*\"[^\"]+\"\\s*,\\s*\"arguments\"\\s*:\\s*\\{[^}]*\\}\\s*\\}");
-    private static final Pattern TOOL_CALL_SEGMENT = Pattern.compile("(?s)<\\|start\\|>.*?<\\|call\\|>");
-    private static final Pattern FINAL_TEXT = Pattern.compile("(?s)^.*?<\\|start\\|>assistant<\\|channel\\|>final<\\|message\\|>(.*)$");
-    private static final Pattern CATEGORY_PRODUCT_ID = Pattern.compile("(?i)\\b(?:kategori|produk|category|product|menu)\\s*(?:[#:]\\s*)?IDs?\\s*[#:]?\\s*\\d+\\b");
-    private static final Pattern STANDALONE_ID = Pattern.compile("(?i)\\bIDs?\\s*[#:]?\\s*\\d+\\b");
-    private static final Pattern ID_CELL = Pattern.compile("(?i)^\\s*ID\\s*$");
-    private static final Pattern SEPARATOR_CELL = Pattern.compile("^:?-{2,}:?$|^-{2,}$|^\\s*$");
-    private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^\\]]+)]\\((https?://[^)\\s]+)\\)");
-    private static final Pattern BARE_URL = Pattern.compile("https?://[^\\s)>\"]+");
+
+    private static final int MAX_CATEGORY_CHIPS = 6;
+    private static final String NO_RESPONSE_FALLBACK = "Maaf, tidak ada respons AI.";
+    private static final String SERVICE_DOWN_FALLBACK = "Maaf, AI sedang tidak tersedia.";
+    private static final String[] STREAM_QUICK_REPLIES =
+            {"Lihat menu lagi", "Rekap pesanan", "Selesai / bayar"};
 
     private final OrderingService orderingService;
     private final CustomerService customerService;
     private final Environment environment;
-    private final Validator validator;
     private final CategoryClient categoryClient;
     private final ProductClient productClient;
-
-    private static final int MAX_CATEGORY_CHIPS = 6;
-    private static final int MAX_PRODUCT_CHIPS = 8;
 
     private final ExecutorService ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -109,7 +100,7 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
      * the {@code sessionId} — preferring a legacy query parameter if present,
      * otherwise reusing the value stored in the {@link VaadinSession} (created
      * on first visit) so no identifying UUID appears in the URL. Then either
-     * shows the customer gate or resumes the conversation for the linked customer.
+     * redirects to sign-in or resumes the conversation for the linked customer.
      *
      * @param event the navigation event
      */
@@ -191,33 +182,18 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         if (greeting == null) {
             return;
         }
-        UI ui = UI.getCurrent();
-        CompletableFuture.supplyAsync(() -> {
-            try {
-                Long customerSessionId = orderingService.ensureSession(sessionId);
-                if (customerSessionId == null) {
-                    return List.<CategoryRecommendation>of();
-                }
-                return categoryClient.getCategories(customerSessionId);
-            } catch (Exception ex) {
-                log.warn("Failed to load menu categories: {}", ex.getMessage());
-                return List.<CategoryRecommendation>of();
+        loadFromBackend("menu categories", categoryClient::getCategories, categories -> {
+            if (categories.isEmpty()) {
+                withQuickReplies(greeting, "Lihat menu", "Menu kopi", "Menu non-kopi");
+                return;
             }
-        }, ioExecutor).thenAccept(categories -> {
-            if (ui == null) return;
-            ui.access(() -> {
-                if (categories == null || categories.isEmpty()) {
-                    withQuickReplies(greeting, "Lihat menu", "Menu kopi", "Menu non-kopi");
-                    return;
-                }
-                currentCategories = List.copyOf(categories);
-                List<String> chips = categories.stream()
-                        .map(CategoryRecommendation::name)
-                        .limit(MAX_CATEGORY_CHIPS)
-                        .toList();
-                greeting.addQuickReplies(chips, this::onCategoryQuickReply);
-                scrollToBottom();
-            });
+            currentCategories = List.copyOf(categories);
+            List<String> chips = categories.stream()
+                    .map(CategoryRecommendation::name)
+                    .limit(MAX_CATEGORY_CHIPS)
+                    .toList();
+            greeting.addQuickReplies(chips, this::onCategoryQuickReply);
+            scrollToBottom();
         });
     }
 
@@ -239,73 +215,63 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
                 .findFirst()
                 .map(CategoryRecommendation::id)
                 .orElse(-1);
+        if (categoryId <= 0) {
+            return;
+        }
 
-        UI ui = UI.getCurrent();
-        if (ui == null) return;
-        CompletableFuture.supplyAsync(() -> {
-            try {
-                Long customerSessionId = orderingService.ensureSession(sessionId);
-                if (customerSessionId == null || categoryId <= 0) {
-                    return List.<ProductRecommendation>of();
-                }
-                return productClient.getByCategory(customerSessionId, categoryId);
-            } catch (Exception ex) {
-                log.warn("Failed to load products for category '{}': {}", categoryName, ex.getMessage());
-                return List.<ProductRecommendation>of();
-            }
-        }, ioExecutor).thenAccept(products -> ui.access(() -> {
-            if (products == null || products.isEmpty()) {
-                return;
-            }
-            AiMessage ai = addAssistantMessage("Menu **" + categoryName + "** — ketuk produk untuk mengisi pesan:");
-            if (ai != null) {
-                attachProductChips(ai, products);
-            }
-            scrollToBottom();
-        }));
+        loadFromBackend(
+                "products for category '" + categoryName + "'",
+                customerSessionId -> productClient.getByCategory(customerSessionId, categoryId),
+                products -> {
+                    if (products.isEmpty()) {
+                        return;
+                    }
+                    AiMessage ai = addAssistantMessage(
+                            "Menu **" + categoryName + "** — ketuk produk untuk mengisi pesan:");
+                    if (ai != null) {
+                        attachProductChips(ai, products);
+                    }
+                    scrollToBottom();
+                });
     }
 
     /**
-     * Adds product chips to an assistant bubble: the chip label shows the
-     * product name (and price), while tapping it fills the composer with an
-     * order intent. If the product has customizations, include guidance in the
-     * draft message.
+     * Runs a backend menu lookup off the request thread and hands the result to the UI.
+     * <p>
+     * Every menu lookup needs the same three things: a customer session, a call that may
+     * fail, and a hop back to the UI thread. Collecting them here keeps each caller down to
+     * the part that is actually different.
+     *
+     * @param what     the resource being loaded, for the failure log
+     * @param loader   the backend call, given the resolved customer session id
+     * @param onLoaded consumer invoked on the UI thread with the (possibly empty) result
+     * @param <T>      the element type of the loaded list
+     */
+    private <T> void loadFromBackend(String what, Function<Long, List<T>> loader, Consumer<List<T>> onLoaded) {
+        UI ui = UI.getCurrent();
+        if (ui == null) {
+            return;
+        }
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                Long customerSessionId = orderingService.ensureSession(sessionId);
+                return customerSessionId == null ? List.<T>of() : loader.apply(customerSessionId);
+            } catch (Exception ex) {
+                log.warn("Failed to load {}: {}", what, ex.getMessage());
+                return List.<T>of();
+            }
+        }, ioExecutor).thenAccept(items -> ui.access(() -> onLoaded.accept(items)));
+    }
+
+    /**
+     * Adds product chips to an assistant bubble. Each chip drafts an order intent,
+     * including the product's customizations when it has any.
      *
      * @param ai       the bubble to decorate
      * @param products the products to render as chips
      */
     private void attachProductChips(AiMessage ai, List<ProductRecommendation> products) {
-        List<QuickReplyChips.Reply> replies = products.stream()
-                .limit(MAX_PRODUCT_CHIPS)
-                .map(p -> {
-                    String base = "Saya mau pesan " + p.name();
-                    if (p.customizations() != null && !p.customizations().isEmpty()) {
-                        StringBuilder sb = new StringBuilder(base);
-                        p.customizations().forEach(c -> {
-                            if (c != null && c.name() != null && !c.name().isBlank()) {
-                                sb.append(" (").append(c.name());
-                                if (c.options() != null && !c.options().isEmpty()) {
-                                    sb.append(": ");
-                                    String opts = c.options().stream()
-                                            .filter(o -> o != null && o.name() != null)
-                                            .limit(3)
-                                            .map(o -> o.name() + (o.price() != null && !o.price().isBlank() ? " +" + o.price() : ""))
-                                            .reduce((a, b) -> a + ", " + b)
-                                            .orElse("");
-                                    sb.append(opts);
-                                    if (c.options().size() > 3) {
-                                        sb.append(", ...");
-                                    }
-                                }
-                                sb.append(")");
-                            }
-                        });
-                        base = sb.toString();
-                    }
-                    return new QuickReplyChips.Reply(p.name() + formatPrice(p.price()), base);
-                })
-                .toList();
-        ai.addQuickRepliesWithPayloads(replies, this::fillInput);
+        ai.addQuickRepliesWithPayloads(MenuChipFactory.productReplies(products), this::fillInput);
     }
 
     /**
@@ -320,16 +286,6 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         }
         chatInput.fill(text);
         scrollToBottom();
-    }
-
-    /**
-     * Formats an optional product price for display.
-     *
-     * @param price the raw price string, possibly blank
-     * @return a formatted suffix, or an empty string when no price is present
-     */
-    private String formatPrice(String price) {
-        return (price != null && !price.isBlank()) ? " · " + price : "";
     }
 
     /**
@@ -362,71 +318,97 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
         }
 
         addUserMessage(message);
-        chatInput.setWaitingForResponse(true);
-        typingIndicator.setVisible(true);
-        if (!typingIndicator.getParent().isPresent()) {
-            chatContainer.add(typingIndicator);
-        }
-        scrollToBottom();
+        showTypingIndicator();
 
         String vaadinSessionId = sessionId;
         UI ui = UI.getCurrent();
-        if (ui != null) ui.push();
+        if (ui != null) {
+            ui.push();
+        }
 
         StringBuilder buffer = new StringBuilder();
+        orderingService.streamMessage(vaadinSessionId, message).subscribe(
+                chunk -> appendChunk(vaadinSessionId, buffer, chunk),
+                error -> handleStreamError(ui, vaadinSessionId, message, buffer.toString(), error),
+                () -> finishReply(ui, buffer.toString(), NO_RESPONSE_FALLBACK));
+    }
 
-        orderingService.streamMessage(vaadinSessionId, message)
-                .subscribe(
-                        chunk -> {
-                            if (chunk == null || chunk.isBlank()) return;
-                            buffer.append(chunk);
-                            log.debug("Stream chunk vaadin={} token='{}' bufLen={}", vaadinSessionId, chunk.replace("\n","\\n"), buffer.length());
-                        },
-                        err -> {
-                            String finalTextSnapshot = buffer.toString();
-                            CompletableFuture.supplyAsync(() -> {
-                                String fallbackText = null;
-                                boolean isLeaked = isLeakedToolJson(finalTextSnapshot);
-                                String finalTextForCheck = isLeaked ? "" : finalTextSnapshot;
-                                if (finalTextForCheck.isBlank()) {
-                                    try {
-                                        var fallback = orderingService.sendMessage(vaadinSessionId, message);
-                                        fallbackText = fallback.message();
-                                    } catch (Exception ex) {
-                                        log.warn("Fallback sendMessage failed", ex);
-                                        fallbackText = "Maaf, AI sedang tidak tersedia.";
-                                    }
-                                }
-                                return fallbackText;
-                            }, Executors.newVirtualThreadPerTaskExecutor()).thenAccept(result -> ui.access(() -> {
-                                log.error("Stream failed vaadin={}: {}", vaadinSessionId, err.getMessage(), err);
-                                typingIndicator.setVisible(false);
-                                if (typingIndicator.getParent().isPresent()) chatContainer.remove(typingIndicator);
-                                String fallbackText = (String) result;
-                                boolean isLeaked = isLeakedToolJson(finalTextSnapshot);
-                                String finalText = isLeaked ? "" : finalTextSnapshot;
-                                if (isLeaked) log.warn("Leaked tool JSON in stream error path, suppressing");
-                                AiMessage ai = addAssistantMessage(finalText.isBlank() ? fallbackText : finalText);
-                                withQuickReplies(ai, "Lihat menu lagi", "Rekap pesanan", "Selesai / bayar");
-                                chatInput.setWaitingForResponse(false);
-                                scrollToBottom();
-                                ui.push();
-                            }));
-                        },
-                        () -> ui.access(() -> {
-                            typingIndicator.setVisible(false);
-                            if (typingIndicator.getParent().isPresent()) chatContainer.remove(typingIndicator);
-                            String finalTextOrig = buffer.toString();
-                            boolean isLeaked = isLeakedToolJson(finalTextOrig);
-                            String finalText = isLeaked ? "" : finalTextOrig;
-                            if (isLeaked) log.warn("Leaked tool JSON in stream complete path, suppressing");
-                            AiMessage ai = addAssistantMessage(finalText.isBlank() ? "Maaf, tidak ada respons AI." : finalText);
-                            withQuickReplies(ai, "Lihat menu lagi", "Rekap pesanan", "Selesai / bayar");
-                            chatInput.setWaitingForResponse(false);
-                            scrollToBottom();
-                            ui.push();
-                        })
-                );
+    private void appendChunk(String sessionId, StringBuilder buffer, String chunk) {
+        if (chunk == null || chunk.isBlank()) {
+            return;
+        }
+        buffer.append(chunk);
+        log.debug("Stream chunk vaadin={} token='{}' bufLen={}",
+                sessionId, chunk.replace("\n", "\\n"), buffer.length());
+    }
+
+    /**
+     * Recovers from a failed stream: if nothing usable was received, asks the
+     * service for a one-shot reply, then renders whatever we end up with.
+     */
+    private void handleStreamError(UI ui, String sessionId, String message, String rawText, Throwable error) {
+        log.error("Stream failed vaadin={}: {}", sessionId, error.getMessage(), error);
+        CompletableFuture.supplyAsync(() -> fallbackReply(sessionId, message, rawText), ioExecutor)
+                .thenAccept(fallback -> finishReply(ui, rawText, fallback));
+    }
+
+    /**
+     * Fetches a one-shot reply to stand in for a failed stream, or {@code null}
+     * when the text already received is usable as-is.
+     */
+    private String fallbackReply(String sessionId, String message, String rawText) {
+        if (!AssistantMessageSanitizer.isLeakedToolJson(rawText) && !rawText.isBlank()) {
+            return null;
+        }
+        try {
+            return orderingService.sendMessage(sessionId, message).message();
+        } catch (Exception ex) {
+            log.warn("Fallback sendMessage failed", ex);
+            return SERVICE_DOWN_FALLBACK;
+        }
+    }
+
+    /**
+     * Renders the final assistant message, suppressing any leaked tool JSON and
+     * clearing the waiting state.
+     *
+     * @param ui           the UI to update, or {@code null} if the view is gone
+     * @param rawText      the text accumulated from the stream
+     * @param fallbackText the text to use when {@code rawText} yields nothing usable
+     */
+    private void finishReply(UI ui, String rawText, String fallbackText) {
+        if (ui == null) {
+            return;
+        }
+        ui.access(() -> {
+            hideTypingIndicator();
+            boolean leaked = AssistantMessageSanitizer.isLeakedToolJson(rawText);
+            if (leaked) {
+                log.warn("Leaked tool JSON in stream, suppressing");
+            }
+            String clean = leaked ? "" : rawText;
+            AiMessage ai = addAssistantMessage(clean.isBlank() ? fallbackText : clean);
+            withQuickReplies(ai, STREAM_QUICK_REPLIES);
+            chatInput.setWaitingForResponse(false);
+            scrollToBottom();
+            ui.push();
+        });
+    }
+
+    private void showTypingIndicator() {
+        chatInput.setWaitingForResponse(true);
+        typingIndicator.setVisible(true);
+        if (typingIndicator.getParent().isEmpty()) {
+            chatContainer.add(typingIndicator);
+        }
+        scrollToBottom();
+    }
+
+    private void hideTypingIndicator() {
+        typingIndicator.setVisible(false);
+        if (typingIndicator.getParent().isPresent()) {
+            chatContainer.remove(typingIndicator);
+        }
     }
 
     /**
@@ -440,16 +422,16 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
 
     /**
      * Appends an assistant chat bubble, sanitizing the raw model transcript
-     * before rendering: strips leaked tool-call JSON and control-token segments
-     * and keeps only the final-channel text, then normalizes spacing.
+     * before rendering, then decorating it with any link shortcuts.
      *
      * @param message the assistant's raw reply text
      * @return the rendered bubble, or {@code null} if the sanitized text was blank
      */
     private AiMessage addAssistantMessage(String message) {
-        if (message == null) return null;
-        String clean = sanitizeAssistantText(message);
-        if (clean.isBlank()) return null;
+        String clean = AssistantMessageSanitizer.sanitize(message);
+        if (clean.isBlank()) {
+            return null;
+        }
         AiMessage ai = new AiMessage(clean);
         chatContainer.add(ai);
         attachLinkChips(ai, clean);
@@ -457,346 +439,17 @@ public class OrderView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /**
-     * Appends an assistant bubble and decorates it with optional menu
-     * shortcuts: recommended products and menu categories rendered as tappable
-     * chips below the message. Tapping a chip fills the composer so the
-     * customer can review and edit the draft before sending.
-     *
-     * @param message        the assistant's reply text
-     * @param products       recommended products to show as chips, or {@code null}
-     * @param categories     menu categories to show as chips, or {@code null}
-     * @param customizations customization groups to show as chips, or {@code null}
-     * @return the rendered bubble, or {@code null} if the sanitized text was blank
-     */
-    private AiMessage addAssistantMessage(String message, List<ProductRecommendation> products,
-                                          List<CategoryRecommendation> categories,
-                                          List<Customization> customizations) {
-        AiMessage ai = addAssistantMessage(message);
-        if (ai == null) {
-            return null;
-        }
-        if (categories != null && !categories.isEmpty()) {
-            addCategoryChips(ai, categories);
-        }
-        if (products != null && !products.isEmpty()) {
-            attachProductChips(ai, products);
-        }
-        if (customizations != null && !customizations.isEmpty()) {
-            addCustomizationChips(ai, customizations);
-        }
-        return ai;
-    }
-
-    private AiMessage addAssistantMessage(String message, List<ProductRecommendation> products,
-                                          List<CategoryRecommendation> categories) {
-        return addAssistantMessage(message, products, categories, null);
-    }
-
-    private void addCustomizationChips(AiMessage ai, List<Customization> customizations) {
-        List<QuickReplyChips.Reply> replies = customizations.stream()
-                .filter(c -> c != null && c.name() != null && !c.name().isBlank())
-                .limit(MAX_CATEGORY_CHIPS)
-                .map(c -> {
-                    StringBuilder sb = new StringBuilder();
-                    if (c.options() != null && !c.options().isEmpty()) {
-                        String opts = c.options().stream()
-                                .filter(o -> o != null && o.name() != null)
-                                .limit(4)
-                                .map(o -> o.name() + (o.price() != null && !o.price().isBlank() ? " +" + o.price() : ""))
-                                .reduce((a, b) -> a + ", " + b)
-                                .orElse("");
-                        sb.append(c.name()).append(": ").append(opts);
-                        if (c.options().size() > 4) {
-                            sb.append(", ...");
-                        }
-                    } else {
-                        sb.append(c.name());
-                    }
-                    String label = sb.toString();
-                    String payload = "Pilih " + c.name() + (c.options() != null && !c.options().isEmpty()
-                            ? ": " + c.options().stream()
-                            .filter(o -> o != null && o.name() != null)
-                            .map(o -> o.name())
-                            .limit(3)
-                            .reduce((a, b) -> a + ", " + b)
-                            .orElse("")
-                            : "");
-                    if (payload.length() > 120) {
-                        payload = "Pilih " + c.name();
-                    }
-                    return new QuickReplyChips.Reply(label, payload);
-                })
-                .toList();
-        if (!replies.isEmpty()) {
-            ai.addQuickRepliesWithPayloads(replies, this::fillInput);
-        }
-    }
-
-    /**
-     * Adds category shortcut chips below an assistant bubble: tapping a chip
-     * fills the composer with that category's name.
-     *
-     * @param ai         the bubble to decorate
-     * @param categories the categories to render as chips (not {@code null})
-     */
-    private void addCategoryChips(AiMessage ai, List<CategoryRecommendation> categories) {
-        List<QuickReplyChips.Reply> replies = categories.stream()
-                .limit(MAX_CATEGORY_CHIPS)
-                .map(c -> new QuickReplyChips.Reply(c.name(), c.name()))
-                .toList();
-        ai.addQuickRepliesWithPayloads(replies, this::fillInput);
-    }
-
-    /**
      * Attaches quick-reply chips for any links mentioned in the assistant
-     * reply: markdown links ({@code [text](url)}) and bare {@code https://…}
-     * URLs. Tapping a chip sends the link's URL back to the AI as a message.
+     * reply. Tapping a chip sends the link's URL back to the AI as a message.
      *
      * @param ai   the bubble to decorate
      * @param text the sanitized reply text to scan for links
      */
     private void attachLinkChips(AiMessage ai, String text) {
-        if (ai == null || text == null || text.isBlank()) {
+        if (ai == null) {
             return;
         }
-        LinkedHashMap<String, String> labelByUrl = new LinkedHashMap<>();
-        java.util.regex.Matcher md = MARKDOWN_LINK.matcher(text);
-        while (md.find()) {
-            String label = md.group(1).trim();
-            String url = md.group(2).trim();
-            if (!label.isEmpty() && !url.isEmpty()) {
-                labelByUrl.putIfAbsent(url, label);
-            }
-        }
-        java.util.regex.Matcher bare = BARE_URL.matcher(text);
-        while (bare.find()) {
-            String url = bare.group().trim().replaceAll("[.,;:)]+$", "");
-            labelByUrl.putIfAbsent(url, safeHost(url));
-        }
-        if (labelByUrl.isEmpty()) {
-            return;
-        }
-        List<QuickReplyChips.Reply> links = labelByUrl.entrySet().stream()
-                .limit(4)
-                .map(e -> new QuickReplyChips.Reply(
-                        e.getValue().isBlank() ? safeHost(e.getKey()) : e.getValue(),
-                        e.getKey()))
-                .toList();
-        ai.addQuickRepliesWithPayloads(links, this::handleUserMessage);
-    }
-
-    /**
-     * Extracts a readable host name from a URL for bare-link chip labels.
-     *
-     * @param url the URL
-     * @return the host (minus the {@code www.} prefix), or the URL on failure
-     */
-    private String safeHost(String url) {
-        try {
-            String host = URI.create(url).getHost();
-            if (host == null || host.isBlank()) {
-                return url;
-            }
-            if (host.startsWith("www.")) {
-                host = host.substring(4);
-            }
-            return host;
-        } catch (Exception ex) {
-            return url;
-        }
-    }
-
-    /**
-     * Cleans the model's raw streamed text for display.
-     * <p>
-     * Removes Claude-style tool-call JSON ({@code {"name","arguments"}}), strips
-     * control-token tool-call segments ({@code <|start|>...<|call|>}), keeps only
-     * the text of a trailing {@code final} channel, drops any remnant of a
-     * {@code thinking} block, and hides internal category/product IDs so raw
-     * identifiers never reach the customer.
-     *
-     * @param message the raw model text
-     * @return the clean, user-facing text
-     */
-    private String sanitizeAssistantText(String message) {
-        String clean = LEAKED_TOOL_CALL.matcher(message).replaceAll("").trim();
-        clean = TOOL_CALL_SEGMENT.matcher(clean).replaceAll("");
-        java.util.regex.Matcher finalText = FINAL_TEXT.matcher(clean);
-        if (finalText.find()) clean = finalText.group(1);
-        clean = clean.replaceAll("(?s)thinking.*?response", "").trim();
-        clean = CATEGORY_PRODUCT_ID.matcher(clean).replaceAll("").trim();
-        clean = STANDALONE_ID.matcher(clean).replaceAll("").trim();
-        clean = stripIdColumn(clean);
-        clean = clean.replaceAll(" {2,}", " ").trim();
-        return clean.replaceAll("([,;:])(?=[^\\s])", "$1 ").trim();
-    }
-
-    /**
-     * Removes an {@code ID} column from tables in the reply.
-     * <p>
-     * The model sometimes echoes internal category/product tables including an {@code ID}
-     * column. Those identifiers are the menu service's business, not the customer's, so the
-     * column is dropped while the meaningful ones (names, prices) are kept.
-     * <p>
-     * Three table shapes are recognised, because the model emits all of them:
-     * <ul>
-     *   <li><strong>pipe</strong> — {@code | ID | Kategori |}, the markdown form;</li>
-     *   <li><strong>tab</strong> — {@code ID\tKategori}, which is what a tool result copied
-     *       verbatim looks like;</li>
-     *   <li><strong>column-aligned</strong> — {@code ID   Kategori} with runs of spaces,
-     *       which is how the model reflows a table when it "tidies" it.</li>
-     * </ul>
-     * A block only counts as a table when its first row has a cell reading exactly
-     * {@code ID}, so ordinary prose containing the word is left alone.
-     *
-     * @param text the reply text
-     * @return the text with any {@code ID} table column removed
-     */
-    private String stripIdColumn(String text) {
-        String[] lines = text.split("\n", -1);
-        StringBuilder result = new StringBuilder();
-        int i = 0;
-        while (i < lines.length) {
-            String line = lines[i];
-            String delimiter = tableDelimiter(line);
-            if (delimiter == null) {
-                result.append(line).append('\n');
-                i++;
-                continue;
-            }
-
-            // Collect the whole contiguous table: rows using the same delimiter.
-            List<String> block = new ArrayList<>();
-            while (i < lines.length && tableDelimiter(lines[i]) != null
-                    && tableDelimiter(lines[i]).equals(delimiter)) {
-                block.add(lines[i]);
-                i++;
-            }
-
-            int idCol = findIdColumn(block, delimiter);
-            if (idCol < 0) {
-                for (String row : block) result.append(row).append('\n');
-                continue;
-            }
-            for (String row : block) {
-                List<String> cells = splitCells(row, delimiter);
-                if (isSeparatorRow(cells)) {
-                    // Keep the alignment row, minus the dropped column.
-                    if (idCol < cells.size()) cells.remove(idCol);
-                    result.append(rebuildRow(cells, delimiter)).append('\n');
-                    continue;
-                }
-                if (idCol < cells.size()) cells.remove(idCol);
-                result.append(rebuildRow(cells, delimiter)).append('\n');
-            }
-        }
-        return result.toString().stripTrailing();
-    }
-
-    /**
-     * Identifies the delimiter a table row uses, or {@code null} when the line is not a row.
-     * <p>
-     * Pipes win when present, since a markdown table may also contain tabs inside a cell.
-     * The space form requires at least two spaces between columns, which distinguishes a
-     * table row from a sentence with a double space in it.
-     *
-     * @param line the line to inspect
-     * @return the delimiter to split on, or {@code null}
-     */
-    private static String tableDelimiter(String line) {
-        String trimmed = line.trim();
-        if (trimmed.isEmpty()) return null;
-        if (trimmed.startsWith("|")) return "|";
-        if (trimmed.contains("\t")) return "\t";
-        // Two or more spaces between two non-space runs: a column-aligned row.
-        if (trimmed.matches(".*\\S {2,}\\S.*")) return " {2,}";
-        return null;
-    }
-
-    /**
-     * Finds the index of the {@code ID} column in a table block, or {@code -1}.
-     * <p>
-     * Only the first non-separator row is examined, which is the header in every table the
-     * model produces. Scanning every row would let a data cell that happens to read "ID"
-     * drop the wrong column.
-     *
-     * @param block     the table rows
-     * @param delimiter the delimiter the rows use
-     * @return the column index, or {@code -1} when there is no ID column
-     */
-    private static int findIdColumn(List<String> block, String delimiter) {
-        for (String row : block) {
-            List<String> cells = splitCells(row, delimiter);
-            if (cells.isEmpty() || isSeparatorRow(cells)) continue;
-            for (int c = 0; c < cells.size(); c++) {
-                if (ID_CELL.matcher(cells.get(c)).matches()) {
-                    return c;
-                }
-            }
-            return -1;
-        }
-        return -1;
-    }
-
-    /**
-     * Splits a table row into its cell texts for the given delimiter.
-     *
-     * @param row       the raw row
-     * @param delimiter the delimiter to split on
-     * @return the trimmed cells, without the empty outer cells a pipe table produces
-     */
-    private static List<String> splitCells(String row, String delimiter) {
-        List<String> cells = new ArrayList<>();
-        for (String part : row.trim().split(delimiter, -1)) {
-            cells.add(part.trim());
-        }
-        if ("|".equals(delimiter)) {
-            if (!cells.isEmpty() && cells.get(0).isEmpty()) cells.remove(0);
-            if (!cells.isEmpty() && cells.get(cells.size() - 1).isEmpty()) {
-                cells.remove(cells.size() - 1);
-            }
-        }
-        return cells;
-    }
-
-    /**
-     * Rebuilds a row from its cells, in the same shape it arrived in.
-     *
-     * @param cells     the remaining cells
-     * @param delimiter the delimiter the table uses
-     * @return the rebuilt row
-     */
-    private static String rebuildRow(List<String> cells, String delimiter) {
-        return switch (delimiter) {
-            case "|" -> cells.isEmpty() ? "| |" : "| " + String.join(" | ", cells) + " |";
-            case "\t" -> String.join("\t", cells);
-            default -> String.join("   ", cells);
-        };
-    }
-
-    /**
-     * Detects whether a table row is a GFM column-alignment separator row.
-     *
-     * @param cells the row's cell texts
-     * @return {@code true} if every cell is an alignment marker or blank
-     */
-    private static boolean isSeparatorRow(List<String> cells) {
-        for (String cell : cells) {
-            if (!SEPARATOR_CELL.matcher(cell).matches()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Detects whether a partial reply leaked raw tool-call JSON to the UI.
-     *
-     * @param msg the reply text to inspect
-     * @return {@code true} if the text looks like leaked tool-call JSON
-     */
-    private boolean isLeakedToolJson(String msg) {
-        return msg != null && msg.trim().startsWith("{") && msg.contains("\"name\"") && msg.contains("\"arguments\"");
+        ai.addQuickRepliesWithPayloads(MenuChipFactory.linkReplies(text), this::handleUserMessage);
     }
 
     /**
