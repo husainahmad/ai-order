@@ -28,7 +28,12 @@ public final class AssistantMessageSanitizer {
     private static final Pattern CATEGORY_PRODUCT_ID = Pattern.compile(
             "(?i)\\b(?:kategori|produk|category|product|menu)\\s*(?:[#:]\\s*)?IDs?\\s*[#:]?\\s*\\d+\\b");
     private static final Pattern STANDALONE_ID = Pattern.compile("(?i)\\bIDs?\\s*[#:]?\\s*\\d+\\b");
-    private static final Pattern ID_CELL = Pattern.compile("(?i)^\\s*ID\\s*$");
+    private static final Pattern OPTION_ID = Pattern.compile(
+            "(?i)\\s*[\\u2013\\u2014-]?\\s*\\b(?:option|opsi)\\s*(?:ids?)?\\s*[#:]?\\s*\\d+\\b");
+    // A table column we should treat as an internal id / sequence column. Besides "ID" the
+    // model also echoes back the "No." header we produced on a previous turn, so both must be
+    // recognised or the second request would keep the raw ids.
+    private static final Pattern ID_CELL = Pattern.compile("(?i)^\\s*(?:id|no\\.?|nomor|number|#)\\s*$");
     private static final Pattern SEPARATOR_CELL = Pattern.compile("^:?-{2,}:?$|^-{2,}$|^\\s*$");
 
     private AssistantMessageSanitizer() {
@@ -55,6 +60,8 @@ public final class AssistantMessageSanitizer {
         // Skip ID removal in table rows: only remove IDs from prose.
         clean = removeIdsFromProse(clean);
         clean = stripIdColumn(clean);
+        // Drop brackets left empty when the only thing inside was an ID.
+        clean = clean.replaceAll("\\(\\s*\\)", "").replaceAll("\\[\\s*\\]", "");
         clean = clean.replaceAll(" {2,}", " ").trim();
         return clean.replaceAll("([,;:])(?=[^\\s])", "$1 ").trim();
     }
@@ -75,6 +82,7 @@ public final class AssistantMessageSanitizer {
         for (String line : lines) {
             if (tableDelimiter(line) == null) {
                 // Not a table row: safe to strip IDs.
+                line = OPTION_ID.matcher(line).replaceAll("").trim();
                 line = CATEGORY_PRODUCT_ID.matcher(line).replaceAll("").trim();
                 line = STANDALONE_ID.matcher(line).replaceAll("").trim();
             }
@@ -115,6 +123,7 @@ public final class AssistantMessageSanitizer {
         return addSequenceNumbers(text);
     }
 
+
     /**
      * Replaces an {@code ID} column in tables with a clean sequence number (1, 2, 3...).
      * <p>
@@ -124,19 +133,10 @@ public final class AssistantMessageSanitizer {
      * <p>
      * Works for all three table shapes (pipe, tab, column-aligned). If no ID column is found,
      * the text is returned unchanged.
-     *
-     * @param text the reply text
-     * @return the text with any {@code ID} column replaced by sequential numbers
-     */
-    /**
-     * Replaces an {@code ID} column in tables with a clean sequence number (1, 2, 3...).
      * <p>
-     * Unlike {@link #stripIdColumn(String)}, this does not remove the column — it preserves
-     * the table structure but replaces the internal IDs with user-friendly ordinal numbers.
-     * This is ideal for menu categories or products shown to customers.
-     * <p>
-     * Works for all three table shapes (pipe, tab, column-aligned). If no ID column is found,
-     * the text is returned unchanged.
+     * For pipe tables, the {@code ID} header is renamed to {@code No.} and cell padding is
+     * normalized to ensure clean Markdown rendering (e.g., {@code | 13 | Coffee |} →
+     * {@code | 1 | Coffee |}).
      *
      * @param text the reply text
      * @return the text with any {@code ID} column replaced by sequential numbers
@@ -145,6 +145,12 @@ public final class AssistantMessageSanitizer {
         String[] lines = text.split("\n", -1);
         StringBuilder result = new StringBuilder();
         int i = 0;
+        // A header may be separated from its rows by a blank line, so remember an ID header
+        // that had no data rows yet and apply it to the next block using the same delimiter.
+        int pendingIdCol = -1;
+        String pendingDelimiter = null;
+        int seq = 1;
+
         while (i < lines.length) {
             String delimiter = tableDelimiter(lines[i]);
             if (delimiter == null) {
@@ -161,19 +167,58 @@ public final class AssistantMessageSanitizer {
             }
 
             int idCol = findIdColumn(block, delimiter);
-            if (idCol < 0) {
+            boolean continuesPending = idCol < 0
+                    && pendingIdCol >= 0
+                    && delimiter.equals(pendingDelimiter);
+            if (idCol < 0 && !continuesPending) {
                 for (String row : block) {
                     result.append(row).append('\n');
                 }
+                pendingIdCol = -1;
+                pendingDelimiter = null;
                 continue;
             }
-            int seq = 1;
+            if (continuesPending) {
+                idCol = pendingIdCol;
+            } else {
+                seq = 1;
+            }
+
+            boolean sawData = false;
+            // When continuing a table whose header was in an earlier block, the first row
+            // here is already data.
+            boolean headerPending = !continuesPending;
             for (String row : block) {
                 List<String> cells = splitCells(row, delimiter);
+                if (isSeparatorRow(cells)) {
+                    // Keep separator rows unchanged
+                    result.append(row).append('\n');
+                    continue;
+                }
                 if (idCol < cells.size()) {
-                    cells.set(idCol, String.valueOf(seq++));
+                    String replacement;
+                    if (headerPending) {
+                        // The header keeps a label; only data rows consume a sequence number.
+                        replacement = "No.";
+                        headerPending = false;
+                    } else {
+                        replacement = String.valueOf(seq++);
+                        sawData = true;
+                    }
+                    // Always show the sequence as the leftmost column, wherever the model
+                    // happened to put the ID column.
+                    cells.remove(idCol);
+                    cells.add(0, replacement);
                 }
                 result.append(rebuildRow(cells, delimiter)).append('\n');
+            }
+
+            if (sawData) {
+                pendingIdCol = -1;
+                pendingDelimiter = null;
+            } else {
+                pendingIdCol = idCol;
+                pendingDelimiter = delimiter;
             }
         }
         return result.toString().stripTrailing();
@@ -289,17 +334,4 @@ public final class AssistantMessageSanitizer {
         return true;
     }
 
-    /**
-     * Replaces an {@code ID} column in tables with a clean sequence number (1, 2, 3...).
-     * <p>
-     * Unlike {@link #stripIdColumn(String)}, this does not remove the column — it preserves
-     * the table structure but replaces the internal IDs with user-friendly ordinal numbers.
-     * This is ideal for menu categories or products shown to customers.
-     * <p>
-     * Works for all three table shapes (pipe, tab, column-aligned). If no ID column is found,
-     * the text is returned unchanged.
-     *
-     * @param text the reply text
-     * @return the text with any {@code ID} column replaced by sequential numbers
-     */
 }

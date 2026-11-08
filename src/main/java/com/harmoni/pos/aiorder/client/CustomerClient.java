@@ -54,11 +54,13 @@ public class CustomerClient {
      * @return matching customers, or an empty list if none found
      */
     public List<CustomerResponse> searchByPhone(String phone) {
+        // The backend exposes a single free-text "search" parameter (name, phone or email);
+        // it has no "phone" filter, so sending one silently returns every customer.
         String uri = UriComponentsBuilder.fromPath(properties.customersPath())
-                .queryParam("phone", phone)
+                .queryParam("search", phone)
                 .queryParam("size", 10)
                 .toUriString();
-        log.debug("GET {}?phone={}", properties.customersPath(), phone);
+        log.debug("GET {}?search={}", properties.customersPath(), phone);
         Map<String, Object> page = webClient.get()
                 .uri(uri)
                 .retrieve()

@@ -41,6 +41,9 @@ import java.util.function.Consumer;
  *   <li><strong>Unknown number</strong> — the card grows into name, email and phone, with
  *       the phone carried over read-only so nothing is typed twice.</li>
  * </ol>
+ * A "Daftar" link on the first step opens the registration form directly for someone who
+ * knows they are new, without making them look their own number up first.
+ * <p>
  * Registration and lookup both end in {@link CustomerService#loginOrRegister}, so the
  * session binding is unchanged.
  *
@@ -135,9 +138,8 @@ public class CustomerGateCard extends Div {
         primaryButton.addClassName("gate-submit");
         primaryButton.addClickShortcut(Key.ENTER);
 
-        secondaryButton = new Button("Ganti nomor", e -> showPhoneStep());
+        secondaryButton = new Button("Belum punya akun? Daftar", e -> toggleAuthMode());
         secondaryButton.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-        secondaryButton.setVisible(false);
         secondaryButton.addClassName("gate-secondary");
 
         VerticalLayout actions = new VerticalLayout(primaryButton, secondaryButton);
@@ -209,7 +211,7 @@ public class CustomerGateCard extends Div {
     // ------------------------------------------------------------------ steps
 
     /**
-     * Renders the first step: the phone number alone.
+     * Renders the first step: the phone number alone, with a link to register instead.
      */
     private void showPhoneStep() {
         step = Step.PHONE;
@@ -217,40 +219,65 @@ public class CustomerGateCard extends Div {
         stepLabel.setVisible(false);
         subtitle.setText("Masuk dengan nomor HP untuk mulai memesan.");
         body.removeAll();
-        // The field goes back to editable: step two sets it read-only.
+        // The field goes back to editable: the lookup path sets it read-only.
         phoneField.setReadOnly(false);
         phoneField.setInvalid(false);
         body.add(phoneField);
         primaryButton.setText("Lanjutkan");
-        secondaryButton.setVisible(false);
+        secondaryButton.setText("Belum punya akun? Daftar");
+        secondaryButton.setVisible(true);
         refreshButtonState();
         phoneField.focus();
     }
 
     /**
-     * Renders the second step: the number is unknown, so collect who they are.
+     * Renders the registration step.
      * <p>
-     * The phone stays on screen but read-only. It is what the account is keyed on, and
-     * hiding it would make the form look like it had forgotten what was just typed.
+     * Reached two ways: after a lookup finds the number unknown, or directly from the
+     * "Daftar" link. In the first case the phone is carried over read-only, since it is what
+     * the account is keyed on; registering directly leaves it editable so the customer can
+     * type it here.
      *
-     * @param phone the number already entered on the first step
+     * @param phone the number already entered on the first step, or {@code null} for a
+     *              direct registration
      */
     private void showRegisterStep(String phone) {
+        boolean fromLookup = phone != null;
         step = Step.REGISTER;
-        stepLabel.setVisible(true);
-        stepLabel.setText("Langkah 2 dari 2");
-        subtitle.setText("Nomor ini belum terdaftar. Lengkapi nama Anda untuk membuat akun.");
+        stepLabel.setVisible(fromLookup);
+        stepLabel.setText(fromLookup ? "Langkah 2 dari 2" : "");
+        subtitle.setText(fromLookup
+                ? "Nomor ini belum terdaftar. Lengkapi nama Anda untuk membuat akun."
+                : "Daftar akun baru untuk mulai memesan.");
         body.removeAll();
-        phoneField.setReadOnly(true);
-        phoneField.setValue(phone);
-        body.add(nameField, emailField, phoneField);
+        phoneField.setReadOnly(fromLookup);
+        if (fromLookup) {
+            phoneField.setValue(phone);
+        }
+        phoneField.setInvalid(false);
+        if (fromLookup) {
+            body.add(nameField, emailField, phoneField);
+        } else {
+            body.add(nameField, phoneField, emailField);
+        }
         primaryButton.setText("Daftar & Mulai");
+        secondaryButton.setText(fromLookup ? "Ganti nomor" : "Sudah punya akun? Masuk");
         secondaryButton.setVisible(true);
         refreshButtonState();
         nameField.focus();
     }
 
-    // ------------------------------------------------------------------ actions
+    /**
+     * Switches between signing in and registering: the secondary button's meaning depends on
+     * the step currently on screen.
+     */
+    private void toggleAuthMode() {
+        if (step == Step.PHONE) {
+            showRegisterStep(null);
+        } else {
+            showPhoneStep();
+        }
+    }
 
     /**
      * Runs whichever step the card is on.
@@ -325,6 +352,17 @@ public class CustomerGateCard extends Div {
         } else {
             nameField.setInvalid(false);
         }
+        if (phone == null) {
+            phoneField.setInvalid(true);
+            phoneField.setErrorMessage("No. HP wajib diisi");
+            invalid = true;
+        } else if (!phone.matches(PHONE_PATTERN)) {
+            phoneField.setInvalid(true);
+            phoneField.setErrorMessage("Format nomor tidak valid");
+            invalid = true;
+        } else {
+            phoneField.setInvalid(false);
+        }
         if (email != null && email.length() > 150) {
             emailField.setInvalid(true);
             emailField.setErrorMessage("Maksimal 150 karakter");
@@ -398,8 +436,6 @@ public class CustomerGateCard extends Div {
                 .addThemeVariants(NotificationVariant.LUMO_SUCCESS);
     }
 
-    // ------------------------------------------------------------------ ui helpers
-
     /**
      * Enables the primary button only when the current step has what it needs.
      */
@@ -411,7 +447,9 @@ public class CustomerGateCard extends Div {
             }
             case REGISTER -> {
                 String name = trimOrNull(nameField.getValue());
-                yield name != null && !nameField.isInvalid();
+                String phone = trimOrNull(phoneField.getValue());
+                yield name != null && !nameField.isInvalid()
+                        && phone != null && !phoneField.isInvalid();
             }
         };
         primaryButton.setEnabled(ready);
@@ -429,6 +467,7 @@ public class CustomerGateCard extends Div {
     private void setBusy(boolean busy) {
         body.setEnabled(!busy);
         primaryButton.setEnabled(!busy);
+        secondaryButton.setEnabled(!busy);
         if (busy) {
             addClassName("gate-busy");
         } else {

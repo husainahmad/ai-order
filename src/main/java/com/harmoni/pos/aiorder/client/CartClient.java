@@ -9,7 +9,6 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -36,8 +35,4 @@ public class CartClient {
                 .block();
     }
 
-    public static class CartApiException extends RuntimeException {
-        public CartApiException(String message) { super(message); }
-        public CartApiException(String message, Throwable cause) { super(message, cause); }
-    }
 }

@@ -32,6 +32,6 @@ vaadin/
 
 # Env
 src/main/resources/application.yml
-
+target/application.yaml
 # Tools
 .aider*

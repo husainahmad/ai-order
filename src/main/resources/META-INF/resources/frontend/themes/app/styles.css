@@ -209,6 +209,18 @@ button:focus-visible {
   letter-spacing: -0.01em;
 }
 
+.logout-button {
+  margin-left: auto;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+}
+
+.logout-button:hover {
+  color: var(--color-error);
+}
+
 /* ============================================================
    Chat Scroller & Container
    ============================================================ */

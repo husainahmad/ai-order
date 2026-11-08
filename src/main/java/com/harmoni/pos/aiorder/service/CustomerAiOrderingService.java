@@ -3,7 +3,6 @@ package com.harmoni.pos.aiorder.service;
 import com.harmoni.pos.aiorder.client.AiChatClient;
 import com.harmoni.pos.aiorder.client.CartClient;
 import com.harmoni.pos.aiorder.client.SessionClient;
-import com.harmoni.pos.aiorder.cart.dto.AddCartItemRequest;
 import com.harmoni.pos.aiorder.dto.ChatResponse;
 import com.vaadin.flow.server.VaadinSession;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +27,13 @@ public class CustomerAiOrderingService implements OrderingService {
         return resolveCustomerSessionId(vaadinSessionId);
     }
 
+    /**
+     * Sends the message and blocks for the complete reply.
+     *
+     * @param vaadinSessionId the Vaadin session id
+     * @param message         the user's message text
+     * @return the assistant's reply, including any attachments
+     */
     @Override
     public ChatResponse sendMessage(String vaadinSessionId, String message) {
         Long customerSessionId = resolveCustomerSessionId(vaadinSessionId);
@@ -39,6 +45,13 @@ public class CustomerAiOrderingService implements OrderingService {
         return new ChatResponse(text, List.of(), List.of(), List.of());
     }
 
+    /**
+     * Streams the assistant's reply for the given message.
+     *
+     * @param vaadinSessionId the Vaadin session id
+     * @param message         the user's message text
+     * @return a cold stream of text chunks; errors terminal with a failed signal
+     */
     @Override
     public Flux<String> streamMessage(String vaadinSessionId, String message) {
         Long customerSessionId = resolveCustomerSessionId(vaadinSessionId);
@@ -50,13 +63,13 @@ public class CustomerAiOrderingService implements OrderingService {
                 .doOnError(e -> log.error("Stream error vaadin={}: {}", vaadinSessionId, e.getMessage(), e));
     }
 
-    public Object addToCart(Long sessionId, AddCartItemRequest request) {
-        log.info("Add to cart sessionId={} productId={} skuId={} qty={} customizations={}",
-                sessionId, request.getProductId(), request.getSkuId(), request.getQuantity(),
-                request.getCustomizations() != null ? request.getCustomizations().size() : 0);
-        return cartClient.addItem(sessionId, request);
-    }
-
+    /**
+     * Resolves the numeric customer-session id for the given Vaadin session,
+     * lazily creating the backend session if needed.
+     *
+     * @param vaadinSessionId the Vaadin session id
+     * @return the customer session id, or {@code null} when unavailable
+     */
     private Long resolveCustomerSessionId(String vaadinSessionId) {
         VaadinSession vs = VaadinSession.getCurrent();
         if (vs == null) return null;

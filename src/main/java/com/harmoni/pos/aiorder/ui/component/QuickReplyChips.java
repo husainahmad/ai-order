@@ -59,6 +59,13 @@ public class QuickReplyChips extends HorizontalLayout {
         return chips;
     }
 
+    /**
+     * Adds a single chip to the row.
+     *
+     * @param label   the text shown on the chip
+     * @param payload the text dispatched to the handler when the chip is tapped
+     * @param handler callback invoked with the clicked chip's payload
+     */
     private void addChip(String label, String payload, Consumer<String> handler) {
         Button chip = new Button(label);
         chip.addClassName("quick-reply-chip");

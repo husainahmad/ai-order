@@ -128,6 +128,45 @@ class AssistantMessageSanitizerTest {
 
             assertThat(result).doesNotContain("ID 5");
         }
+
+        @Test
+        @DisplayName("strips option IDs from a customization list")
+        void stripsOptionIds() {
+            String input = """
+                    Pilih Susu – pilih satu:
+                    Oat Milk (+Rp1.000) – option 5
+                    Susu Bendera (+Rp500) – option 10
+                    Temperature – pilih satu:
+                    Ice – option 12
+                    Hot – option 13""";
+
+            String result = AssistantMessageSanitizer.sanitize(input);
+
+            assertThat(result)
+                    .contains("Oat Milk (+Rp1.000)")
+                    .contains("Susu Bendera (+Rp500)")
+                    .contains("Ice")
+                    .contains("Hot")
+                    .doesNotContainIgnoringCase("option")
+                    .doesNotContainIgnoringCase("opsi");
+        }
+
+        @Test
+        @DisplayName("strips option-id variants and leaves no empty brackets")
+        void stripsOptionIdVariants() {
+            assertThat(AssistantMessageSanitizer.sanitize("Oat Milk option 5")).isEqualTo("Oat Milk");
+            assertThat(AssistantMessageSanitizer.sanitize("Susu Bendera - option id 10")).isEqualTo("Susu Bendera");
+            assertThat(AssistantMessageSanitizer.sanitize("Ice – opsi 12")).isEqualTo("Ice");
+            assertThat(AssistantMessageSanitizer.sanitize("Hot (option #13)")).isEqualTo("Hot");
+        }
+
+        @Test
+        @DisplayName("leaves prose that mentions options without an ID alone")
+        void leavesOptionProseAlone() {
+            String input = "Ada dua pilihan variasi";
+
+            assertThat(AssistantMessageSanitizer.sanitize(input)).isEqualTo(input);
+        }
     }
 
     @Nested
@@ -175,19 +214,79 @@ class AssistantMessageSanitizerTest {
             String result = AssistantMessageSanitizer.addSequenceNumbers(input);
 
             assertThat(result)
-                    .contains("1\tNama Kategori")
-                    .contains("2\tCoffee")
-                    .contains("3\tNon Coffee")
-                    .contains("4\tSnack")
-                    .contains("5\tFood")
-                    .contains("6\tBrewed")
-                    .contains("7\tAdditional")
+                    .contains("No.\tNama Kategori")
+                    .contains("1\tCoffee")
+                    .contains("2\tNon Coffee")
+                    .contains("3\tSnack")
+                    .contains("4\tFood")
+                    .contains("5\tBrewed")
+                    .contains("6\tAdditional")
                     .doesNotContain("13\t")
                     .doesNotContain("14\t")
                     .doesNotContain("15\t")
                     .doesNotContain("16\t")
                     .doesNotContain("17\t")
                     .doesNotContain("18\t");
+        }
+
+        @Test
+        @DisplayName("replaces ID column with sequence numbers in a pipe table")
+        void replacesIdWithSequenceInPipeTable() {
+            String input = "| ID | Kategori |\n|----|----------|\n| 13 | Coffee |\n| 14 | Non Coffee |";
+
+            String result = AssistantMessageSanitizer.addSequenceNumbers(input);
+
+            assertThat(result)
+                    .contains("| No. | Kategori |")
+                    .contains("| 1 | Coffee |")
+                    .contains("| 2 | Non Coffee |")
+                    .doesNotContain("| 13 |")
+                    .doesNotContain("| 14 |");
+        }
+
+        @Test
+        @DisplayName("renumbers when the header is 'No' instead of 'ID'")
+        void renumbersNoHeader() {
+            String input = "No\tNama Kategori\n13\tCoffee\n14\tNon Coffee";
+
+            String result = AssistantMessageSanitizer.addSequenceNumbers(input);
+
+            assertThat(result)
+                    .contains("No.\tNama Kategori")
+                    .contains("1\tCoffee")
+                    .contains("2\tNon Coffee")
+                    .doesNotContain("13\t")
+                    .doesNotContain("14\t");
+        }
+
+        @Test
+        @DisplayName("renumbers when the header and rows are separated by a blank line")
+        void renumbersAcrossBlankLine() {
+            String input = "No\tNama Kategori\n\n13\tCoffee\n14\tNon Coffee";
+
+            String result = AssistantMessageSanitizer.addSequenceNumbers(input);
+
+            assertThat(result)
+                    .contains("No.\tNama Kategori")
+                    .contains("1\tCoffee")
+                    .contains("2\tNon Coffee")
+                    .doesNotContain("13\t")
+                    .doesNotContain("14\t");
+        }
+
+        @Test
+        @DisplayName("moves the sequence column to the left even when the ID was on the right")
+        void movesSequenceToLeft() {
+            String input = "Nama Kategori\tID\nCoffee\t13\nNon Coffee\t14";
+
+            String result = AssistantMessageSanitizer.addSequenceNumbers(input);
+
+            assertThat(result)
+                    .contains("No.\tNama Kategori")
+                    .contains("1\tCoffee")
+                    .contains("2\tNon Coffee")
+                    .doesNotContain("13")
+                    .doesNotContain("14");
         }
 
         @Test

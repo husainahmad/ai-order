@@ -1,7 +1,5 @@
 package com.harmoni.pos.aiorder.ui.component;
 
-import com.vaadin.flow.component.Key;
-import com.vaadin.flow.component.KeyModifier;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.icon.Icon;
@@ -54,11 +52,18 @@ public class ChatInput extends HorizontalLayout {
         textArea.setClearButtonVisible(false);
         textArea.setWidthFull();
 
-        textArea.addKeyDownListener(Key.ENTER, e -> {
-            if (!e.getModifiers().contains(KeyModifier.SHIFT)) {
-                sendMessage();
-            }
-        });
+        // Enter sends; Shift+Enter inserts a newline. This is handled on the client so the
+        // default newline can be prevented before it is inserted — a server-side key listener
+        // cannot stop the browser's default action for a multi-line field.
+        textArea.getElement().executeJs("""
+                this.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        this.dispatchEvent(new CustomEvent('chat-send', { bubbles: true }));
+                    }
+                });
+                """);
+        textArea.getElement().addEventListener("chat-send", event -> sendMessage());
 
         sendButton = new Button(new Icon(VaadinIcon.ARROW_UP));
         sendButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);

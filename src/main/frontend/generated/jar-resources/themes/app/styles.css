@@ -209,6 +209,18 @@ button:focus-visible {
   letter-spacing: -0.01em;
 }
 
+.logout-button {
+  margin-left: auto;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+}
+
+.logout-button:hover {
+  color: var(--color-error);
+}
+
 /* ============================================================
    Chat Scroller & Container
    ============================================================ */
@@ -701,15 +713,30 @@ button:focus-visible {
 }
 
 /* ============================================================
-   Customer Gate Dialog
+   Customer Gate Card — sign in / register
    ============================================================ */
 
-.customer-gate-dialog {
-  --lumo-border-radius: var(--radius-xl);
-  --gate-text-primary: #ffffff;
-  --gate-text-secondary: #d6d3d1;
-  --gate-text-tertiary: #a8a29e;
+/* The card is the landing page's content: a single warm surface, centred, with a
+   hairline edge and a soft shadow instead of a heavy border. */
+.customer-gate-card {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--sp-8) var(--sp-6) var(--sp-6);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+
+  --lumo-border-radius: var(--radius-md);
+  --lumo-primary-color: var(--color-accent);
+  --lumo-primary-text-color: var(--color-accent);
+  --lumo-primary-contrast-color: var(--color-accent-text);
+  --lumo-error-color: var(--color-error);
+  --lumo-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+                      "Helvetica Neue", Arial, sans-serif;
 }
+
+/* ---------------------------------------------------------- hero */
 
 .gate-hero {
   display: flex;
@@ -717,28 +744,33 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   text-align: center;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-4);
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-5);
 }
 
+/* The brand mark sits on a soft accent disc, ringed so it reads as a logo rather
+   than as a floating icon. */
 .gate-logo {
-  width: 56px;
-  height: 56px;
-  border-radius: var(--radius-xl);
+  width: 60px;
+  height: 60px;
+  border-radius: var(--radius-full);
   background-color: var(--color-accent-light);
   color: var(--color-accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 26px;
+  font-size: 28px;
   flex-shrink: 0;
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 8%, transparent);
+  margin-bottom: var(--sp-2);
 }
 
 .gate-title {
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-size: 1.375rem;
+  font-weight: 650;
   color: var(--color-text-primary);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 
 .gate-subtitle {
@@ -746,77 +778,150 @@ button:focus-visible {
   color: var(--color-text-secondary);
   line-height: 1.5;
   max-width: 300px;
+  margin: 0 auto;
+}
+
+/* Step counter: a quiet eyebrow above the form. */
+.gate-step {
+  margin-top: var(--sp-3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+/* ---------------------------------------------------------- form */
+
+.gate-body {
+  gap: var(--sp-3);
+}
+
+.gate-body vaadin-text-field::part(label),
+.gate-body vaadin-email-field::part(label) {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--sp-1);
+}
+
+.gate-body vaadin-text-field::part(input-field),
+.gate-body vaadin-email-field::part(input-field) {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  font-weight: 400;
+  color: var(--color-text-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+              background-color var(--transition-fast);
+}
+
+.gate-body vaadin-text-field::part(input-field):hover,
+.gate-body vaadin-email-field::part(input-field):hover {
+  border-color: var(--color-text-tertiary);
+}
+
+.gate-body vaadin-text-field[focused]::part(input-field),
+.gate-body vaadin-email-field[focused]::part(input-field) {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 15%, transparent);
+  background-color: var(--color-surface);
+}
+
+.gate-body vaadin-text-field[invalid]::part(input-field),
+.gate-body vaadin-email-field[invalid]::part(input-field) {
+  border-color: var(--color-error);
+}
+
+.gate-body vaadin-text-field::part(helper-text),
+.gate-body vaadin-email-field::part(helper-text) {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+/* The phone carried onto step two is a confirmation, not an editable field. */
+.gate-body vaadin-text-field[readonly]::part(input-field) {
+  background-color: var(--color-border-subtle);
+  border-style: dashed;
+  color: var(--color-text-secondary);
+}
+
+.gate-body vaadin-text-field[readonly]::part(label) {
+  color: var(--color-text-tertiary);
+}
+
+/* ---------------------------------------------------------- actions */
+
+.gate-actions {
+  gap: var(--sp-1);
+  margin-top: var(--sp-5);
 }
 
 .gate-submit {
+  font-size: 0.9375rem;
+  font-weight: 600;
   letter-spacing: 0.01em;
+  min-height: 46px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-accent);
+  color: var(--color-accent-text);
+  box-shadow: var(--shadow-sm);
+  transition: background-color var(--transition-fast), transform var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+
+.gate-submit:hover {
+  background-color: var(--color-accent-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.gate-submit:active {
+  transform: scale(0.99);
+}
+
+.gate-submit[disabled] {
+  opacity: 0.45;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.gate-secondary {
+  font-size: 0.8125rem;
   font-weight: 500;
-}
-
-.customer-gate-dialog::part(header),
-.customer-gate-dialog::part(title),
-.customer-gate-dialog::part(header-content) {
-  font-weight: 400;
-}
-
-.customer-gate-dialog vaadin-text-field::part(label),
-.customer-gate-dialog vaadin-email-field::part(label) {
-  font-weight: 400;
-}
-
-.customer-gate-dialog vaadin-text-field::part(input-field),
-.customer-gate-dialog vaadin-email-field::part(input-field) {
-  font-weight: 300;
-}
-
-.customer-gate-dialog::part(overlay) {
-  background-color: var(--dialog-overlay-bg);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-
-.customer-gate-dialog::part(dialog) {
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
-  border: 1px solid var(--color-border);
-}
-
-.dialog-subtitle {
-  font-size: 0.875rem;
   color: var(--color-text-secondary);
-  line-height: 1.5;
-  margin-bottom: var(--sp-2);
 }
 
-@media (prefers-color-scheme: dark) {
-  .customer-gate-dialog {
-    --color-text-primary: var(--gate-text-primary);
-    --color-text-secondary: var(--gate-text-secondary);
-    --color-text-tertiary: var(--gate-text-tertiary);
-    --lumo-base-color: var(--color-surface-elevated);
-    --lumo-body-text-color: #ffffff;
-    --lumo-secondary-text-color: var(--gate-text-secondary);
-    --lumo-tertiary-text-color: var(--gate-text-tertiary);
-    --lumo-header-text-color: #ffffff;
-    --lumo-primary-text-color: var(--color-accent);
-    --lumo-primary-color: var(--color-accent);
+.gate-secondary:hover {
+  color: var(--color-accent);
+}
+
+/* While a lookup or registration runs, the form recedes: it is clear that nothing
+   more can be typed until the request comes back. */
+.customer-gate-card.gate-busy .gate-body {
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity var(--transition-base);
+}
+
+/* ---------------------------------------------------------- mobile */
+
+@media (max-width: 480px) {
+  .customer-gate-card {
+    max-width: 100%;
+    padding: var(--sp-6) var(--sp-4) var(--sp-4);
+    border-radius: var(--radius-lg);
   }
 
-  .customer-gate-dialog::part(dialog) {
-    background-color: var(--color-surface-elevated);
-    border-color: var(--color-border);
-    box-shadow: var(--shadow-lg);
+  .gate-logo {
+    width: 52px;
+    height: 52px;
+    font-size: 24px;
   }
 
-  .customer-gate-dialog vaadin-text-field::part(input-field),
-  .customer-gate-dialog vaadin-email-field::part(input-field) {
-    color: #ffffff;
-  }
-
-  .customer-gate-dialog::part(overlay) {
-    background-color: var(--dialog-overlay-bg);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
+  .gate-title {
+    font-size: 1.25rem;
   }
 }
 
