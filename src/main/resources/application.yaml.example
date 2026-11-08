@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: aiorder
+vaadin:
+  launch-browser: true
+
+server:
+  port: 8085
+
+app:
+  store-name: Kopi Harmoni
+
+customer:
+  api:
+    base-url: http://localhost:8084
+    customers-path: /api/v1/customers
+    sessions-path: /api/v1/customer-sessions
+    timeout-ms: 60000
+    source: AI_CHAT
+    cart:
+      url: http://localhost:8084
+      base-path: /api/v1/customer-sessions
+      add-item-path: /cart/items
